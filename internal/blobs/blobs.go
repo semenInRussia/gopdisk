@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 var BLOB_MAX_SIZE int = 16 * 1024 * 1024 // 16MB
@@ -33,25 +34,55 @@ func MakeBlobStorage(path string) (*BlobStorage, error) {
 
 // write data to correct file on file system, return hash of given data
 func (bs *BlobStorage) AddData(data []byte) ([]Blob, error) {
-	size := len(data)
+	blobs := make([]Blob, (len(data)+BLOB_MAX_SIZE-1)/BLOB_MAX_SIZE)
 
-	if size <= BLOB_MAX_SIZE {
-		hash := computeHash(data)
-		blob := Blob{Hash: hash, Size: size}
-		return []Blob{blob}, bs.writeFile(hash, data, 0644)
+	i := 0
+	var err error
+	var wg sync.WaitGroup
+
+	for arr := range SplitDataOnChunks(data) {
+		wg.Add(1)
+
+		go func(i int) {
+			defer wg.Done()
+			var e error
+			blobs[i], e = bs.addOneBlob(arr)
+			if e != nil {
+				err = e
+			}
+		}(i)
+
+		i += 1
 	}
-	l := 0
-	blobs := []Blob{}
-	for l < size {
-		r := min(l+BLOB_MAX_SIZE, size)
-		bl, err := bs.AddData(data[l:r])
-		if err != nil {
-			return nil, err
+
+	wg.Wait()
+
+	return blobs, err
+}
+
+func SplitDataOnChunks(data []byte) chan []byte {
+	ch := make(chan []byte)
+
+	go func() {
+		size := len(data)
+		l := 0
+		for l < size {
+			r := min(l+BLOB_MAX_SIZE, size)
+			ch <- data[l:r]
+			l = r
 		}
-		blobs = append(blobs, bl[0])
-		l = r
-	}
-	return blobs, nil
+		close(ch)
+	}()
+
+	return ch
+}
+
+func (bs *BlobStorage) addOneBlob(data []byte) (Blob, error) {
+	size := len(data)
+	// assert(size <= BLOB_MAX_SIZE)
+	hash := computeHash(data)
+	blob := Blob{Hash: hash, Size: size}
+	return blob, bs.writeFile(hash, data, 0644)
 }
 
 func (bs *BlobStorage) DeleteBob(blob Blob) error {
