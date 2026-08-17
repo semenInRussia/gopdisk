@@ -14,7 +14,7 @@ import (
 	"sync"
 )
 
-var BLOB_MAX_SIZE int = 16 * 1024 * 1024 // 16MB
+var BlobMaxSize int = 16 * 1024 * 1024 // 16MB
 var ErrBlobOverflow = errors.New("probided data for one blob is more than expected")
 
 type BlobStorage struct {
@@ -77,7 +77,7 @@ func SplitDataOnChunks(data []byte) chan []byte {
 		size := len(data)
 		l := 0
 		for l < size {
-			r := min(l+BLOB_MAX_SIZE, size)
+			r := min(l+BlobMaxSize, size)
 			ch <- data[l:r]
 			l = r
 		}
@@ -89,7 +89,7 @@ func SplitDataOnChunks(data []byte) chan []byte {
 
 func (bs *BlobStorage) AddOneChunk(data []byte) (*Blob, error) {
 	size := len(data)
-	if size > BLOB_MAX_SIZE {
+	if size > BlobMaxSize {
 		return nil, ErrBlobOverflow
 	}
 	hash := computeHash(data)
@@ -139,7 +139,7 @@ func (bs *BlobStorage) ReadBlob(blob Blob) ([]byte, error) {
 }
 
 func ComputeChunksAmount(size int) int {
-	return (size + BLOB_MAX_SIZE - 1) / BLOB_MAX_SIZE
+	return (size + BlobMaxSize - 1) / BlobMaxSize
 }
 
 // internal

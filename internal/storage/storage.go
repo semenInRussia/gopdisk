@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 )
 
-var MAX_PART_SIZE = blobs.BLOB_MAX_SIZE
+var MaxPartSize = blobs.BlobMaxSize
 var ErrStorageFileNotFound = errors.New("Could not find a file in storage")
 
 type FileID string
