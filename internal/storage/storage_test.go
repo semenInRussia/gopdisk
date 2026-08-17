@@ -3,6 +3,7 @@ package storage
 import (
 	"bytes"
 	"errors"
+	"gopherdisk/internal/blobs"
 	"os"
 	"testing"
 )
@@ -230,5 +231,32 @@ func TestUploadMovie(t *testing.T) {
 
 	if !bytes.Equal(got, data) {
 		t.Fatalf("read unexpeced movie")
+	}
+}
+
+func TestComputeChunksAmount(t *testing.T) {
+	tests := []struct {
+		size int
+		want int
+	}{
+		{0, 0},
+		{1, 1},
+		{MaxPartSize, 1},
+		{MaxPartSize + 1, 2},
+		{2 * MaxPartSize, 2},
+		{2*MaxPartSize + 1, 3},
+	}
+
+	for _, tt := range tests {
+		got := blobs.ComputeChunksAmount(tt.size)
+
+		if got != tt.want {
+			t.Fatalf(
+				"size=%d: got %d chunks, expected %d",
+				tt.size,
+				got,
+				tt.want,
+			)
+		}
 	}
 }

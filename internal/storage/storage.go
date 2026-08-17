@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 )
 
-var MaxPartSize = blobs.BlobMaxSize
+var MaxPartSize = blobs.BlobsMaxSize
 var ErrStorageFileNotFound = errors.New("Could not find a file in storage")
 
 type FileID string
@@ -85,14 +85,14 @@ func (s *Storage) Upload(
 
 	i := 0
 	var wg sync.WaitGroup
-	errCh := make(chan error)
+	errCh := make(chan error, blobs.ComputeChunksAmount(len(data)))
 
 	for arr := range blobs.SplitDataOnChunks(data) {
 		wg.Add(1)
 		go func(i int) {
+			defer wg.Done()
 			_, err := s.UploadPart(file.ID, i, arr)
 			errCh <- err
-			wg.Done()
 		}(i)
 		i += 1
 	}
