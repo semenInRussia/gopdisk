@@ -97,7 +97,7 @@ func (bs *BlobStorage) AddOneChunk(data []byte) (*Blob, error) {
 	return &blob, bs.writeFile(hash, data, 0644)
 }
 
-func (bs *BlobStorage) DeleteBob(blob Blob) error {
+func (bs *BlobStorage) DeleteBlob(blob Blob) error {
 	return bs.deleteFile(blob.Hash)
 }
 
