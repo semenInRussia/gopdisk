@@ -21,7 +21,7 @@ type File struct {
 	Name     string
 	Filetype FileKind
 	OwnerID  UserID
-	Blob     blobs.Blob
+	Blobs    []blobs.Blob
 }
 
 type Storage struct {
@@ -69,7 +69,7 @@ func (s *Storage) Upload(
 	fileType FileKind,
 	data []byte,
 ) (*File, error) {
-	blob, err := s.bs.AddBlob(data)
+	blobs, err := s.bs.AddData(data)
 
 	if err != nil {
 		return nil, err
@@ -80,7 +80,7 @@ func (s *Storage) Upload(
 		Name:     name,
 		Filetype: fileType,
 		OwnerID:  ownerId,
-		Blob:     blob,
+		Blobs:    blobs,
 	}
 
 	s.files[f.ID] = &f
@@ -111,11 +111,11 @@ func (s *Storage) Rename(fileId FileID, newName string) (*File, error) {
 
 func (s *Storage) UpdateData(fileId FileID, newData []byte) (*File, error) {
 	return s.changeFile(fileId, func(file *File) error {
-		blob, err := s.bs.AddBlob(newData)
+		blobs, err := s.bs.AddData(newData)
 		if err != nil {
 			return err
 		}
-		file.Blob = blob
+		file.Blobs = blobs
 		return nil
 	})
 }
@@ -129,10 +129,17 @@ func (s *Storage) changeFile(fileId FileID, f func(*File) error) (*File, error) 
 	return file, err
 }
 
-func (s *Storage) Read(fileId FileID) ([]byte, error) {
+func (s *Storage) Read(fileId FileID) (<-chan []byte, <-chan error) {
 	file := s.files[fileId]
 	if file == nil {
-		return nil, ErrStorageFileNotFound
+		data := make(chan []byte)
+		err := make(chan error)
+		go func() {
+			close(data)
+			err <- ErrStorageFileNotFound
+			close(err)
+		}()
+		return data, err
 	}
-	return s.bs.ReadBlob(file.Blob)
+	return s.bs.ReadBlobs(file.Blobs)
 }
