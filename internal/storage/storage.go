@@ -1,11 +1,8 @@
 package storage
 
 import (
-	"crypto/sha256"
 	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
+	"gopherdisk/internal/blobs"
 
 	"github.com/google/uuid"
 )
@@ -24,27 +21,28 @@ type File struct {
 	Name     string
 	Filetype FileKind
 	OwnerID  UserID
-	Size     int
-	Hash     string
+	Blob     blobs.Blob
 }
 
 type Storage struct {
-	Path  string
+	bs    blobs.BlobStorage
 	files map[FileID]*File
 	users map[UserID]*User
 }
 
 func MakeStorage(path string) (*Storage, error) {
+	bs, err := blobs.MakeBlobStorage(path)
+	if err != nil {
+		return nil, err
+	}
+
 	s := Storage{
-		Path:  path,
+		bs:    *bs,
 		files: make(map[FileID]*File),
 		users: make(map[UserID]*User),
 	}
-	err := os.Mkdir(path, 0755)
-	if os.IsExist(err) || err == nil {
-		return &s, nil
-	}
-	return nil, err
+
+	return &s, nil
 }
 
 func (s *Storage) AddUser(name string) (*User, error) {
@@ -71,7 +69,7 @@ func (s *Storage) Upload(
 	fileType FileKind,
 	data []byte,
 ) (*File, error) {
-	hash, err := s.writeBlob(data)
+	blob, err := s.bs.AddBlob(data)
 
 	if err != nil {
 		return nil, err
@@ -82,8 +80,7 @@ func (s *Storage) Upload(
 		Name:     name,
 		Filetype: fileType,
 		OwnerID:  ownerId,
-		Size:     len(data),
-		Hash:     hash,
+		Blob:     blob,
 	}
 
 	s.files[f.ID] = &f
@@ -114,12 +111,11 @@ func (s *Storage) Rename(fileId FileID, newName string) (*File, error) {
 
 func (s *Storage) UpdateData(fileId FileID, newData []byte) (*File, error) {
 	return s.changeFile(fileId, func(file *File) error {
-		newHash, err := s.writeBlob(newData)
+		blob, err := s.bs.AddBlob(newData)
 		if err != nil {
 			return err
 		}
-		file.Hash = newHash
-		file.Size = len(newData)
+		file.Blob = blob
 		return nil
 	})
 }
@@ -138,50 +134,5 @@ func (s *Storage) Read(fileId FileID) ([]byte, error) {
 	if file == nil {
 		return nil, ErrStorageFileNotFound
 	}
-	return s.readBlob(file.Hash)
-}
-
-// blobs
-//
-// every blob is a real file in file system that responds on struct File that visible for user
-
-// write data to correct file on file system, return hash of given data
-func (s *Storage) writeBlob(data []byte) (string, error) {
-	hash := computeHash(data)
-	return hash, s.writeFile(hash, data, 0644)
-}
-
-func (s *Storage) readBlob(hash string) ([]byte, error) {
-	file, err := s.openFile(hash, os.O_RDONLY, 0644)
-	if err != nil {
-		return nil, err
-	}
-	res := make([]byte, 1024)
-	n, err := file.Read(res)
-	if err != nil {
-		return nil, err
-	}
-	return res[:n], nil
-}
-
-// internal
-
-func (s *Storage) openFile(hash string, flag int, perm os.FileMode) (*os.File, error) {
-	path := filepath.Join(s.Path, hash)
-	return os.OpenFile(path, flag, perm)
-}
-
-func (s *Storage) writeFile(hash string, data []byte, perm os.FileMode) error {
-	path := filepath.Join(s.Path, hash)
-	return os.WriteFile(path, data, perm)
-}
-
-func (s *Storage) deleteFile(hash string) error {
-	path := filepath.Join(s.Path, hash)
-	return os.Remove(path)
-}
-
-func computeHash(data []byte) string {
-	hash := fmt.Sprintf("%x", sha256.Sum256(data))
-	return hash
+	return s.bs.ReadBlob(file.Blob)
 }

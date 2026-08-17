@@ -12,7 +12,7 @@ func getStorage() (*Storage, error) {
 }
 
 func dropStorage(s *Storage) error {
-	return os.RemoveAll(s.Path)
+	return os.RemoveAll(s.bs.Path)
 }
 
 func TestAddUser(t *testing.T) {
