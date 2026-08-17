@@ -85,20 +85,28 @@ func (s *Storage) Upload(
 
 	i := 0
 	var wg sync.WaitGroup
-	var err error
+	errCh := make(chan error)
 
 	for arr := range blobs.SplitDataOnChunks(data) {
 		wg.Add(1)
 		go func(i int) {
-			_, err = s.UploadPart(file.ID, i, arr)
+			_, err := s.UploadPart(file.ID, i, arr)
+			errCh <- err
 			wg.Done()
 		}(i)
 		i += 1
 	}
 
 	wg.Wait()
+	close(errCh)
 
-	return s.GetFile(file.ID), err
+	for err := range errCh {
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return s.GetFile(file.ID), nil
 }
 
 func (s *Storage) PreUpload(

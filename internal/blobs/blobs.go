@@ -40,7 +40,7 @@ func (bs *BlobStorage) AddData(data []byte) ([]Blob, error) {
 	blobs := make([]Blob, ComputeChunksAmount(size))
 
 	i := 0
-	var err error
+	errCh := make(chan error)
 	var wg sync.WaitGroup
 
 	for arr := range SplitDataOnChunks(data) {
@@ -49,18 +49,25 @@ func (bs *BlobStorage) AddData(data []byte) ([]Blob, error) {
 		go func(i int) {
 			defer wg.Done()
 			bl, e := bs.AddOneChunk(arr)
+			errCh <- e
 			if e != nil {
-				err = e
+				blobs[i] = *bl
 			}
-			blobs[i] = *bl
 		}(i)
 
 		i += 1
 	}
 
 	wg.Wait()
+	close(errCh)
 
-	return blobs, err
+	for err := range errCh {
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return blobs, nil
 }
 
 func SplitDataOnChunks(data []byte) chan []byte {
