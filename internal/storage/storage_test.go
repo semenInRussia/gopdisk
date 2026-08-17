@@ -3,7 +3,6 @@ package storage
 import (
 	"bytes"
 	"errors"
-	"gopherdisk/internal/blobs"
 	"os"
 	"testing"
 )
@@ -200,20 +199,13 @@ func TestRename(t *testing.T) {
 	}
 }
 
-func TestUploadMovie(t *testing.T) {
+func testUpload(t *testing.T, data []byte) {
+	t.Helper()
 	s := getStorage(t)
-	filename := "/Users/semeninrussia/Desktop/movie.mov"
-	data, err := os.ReadFile(filename)
-
-	if err != nil {
-		t.Fatalf("Cannot open movie.mov file: %v", err)
-	}
-
 	kotik, err := s.AddUser("Kotik")
 	if err != nil {
 		t.Fatalf("cannot add user Kotik: %v", err)
 	}
-
 	file, err := s.Upload(
 		kotik.ID,
 		"Movie!",
@@ -221,42 +213,41 @@ func TestUploadMovie(t *testing.T) {
 		data,
 	)
 	if err != nil {
-		t.Fatalf("cannot upload movie: %v", err)
+		t.Fatalf("cannot upload file: %v", err)
 	}
 
 	got, err := readAll(t, s, file.ID)
 	if err != nil {
-		t.Fatalf("cannot read stored movie: %v", err)
+		t.Fatalf("cannot read stored file: %v", err)
 	}
-
 	if !bytes.Equal(got, data) {
-		t.Fatalf("read unexpeced movie")
+		t.Fatalf("read unexpeced data")
 	}
 }
 
-func TestComputeChunksAmount(t *testing.T) {
-	tests := []struct {
-		size int
-		want int
-	}{
-		{0, 0},
-		{1, 1},
-		{MaxPartSize, 1},
-		{MaxPartSize + 1, 2},
-		{2 * MaxPartSize, 2},
-		{2*MaxPartSize + 1, 3},
+func TestUploadMovie80mb(t *testing.T) {
+	filename := "testdata/movie.mov"
+	data, err := os.ReadFile(filename)
+
+	if err != nil {
+		t.Fatalf("Cannot open movie.mov file: %v", err)
 	}
 
-	for _, tt := range tests {
-		got := blobs.ComputeChunksAmount(tt.size)
+	testUpload(t, data)
+}
 
-		if got != tt.want {
-			t.Fatalf(
-				"size=%d: got %d chunks, expected %d",
-				tt.size,
-				got,
-				tt.want,
-			)
-		}
+func TestUpload16mb(t *testing.T) {
+	data := make([]byte, 16*1024*1024)
+	for i := range data {
+		data[i] = byte(i % (67 + 52))
 	}
+	testUpload(t, data)
+}
+
+func TestUpload16mbPlus1(t *testing.T) {
+	data := make([]byte, 16*1024*1024+1)
+	for i := range data {
+		data[i] = byte(i % (67 + 52))
+	}
+	testUpload(t, data)
 }

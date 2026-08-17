@@ -189,14 +189,14 @@ func (s *Storage) changeFile(fileId FileID, f func(*File) error) (*File, error) 
 func (s *Storage) Read(fileId FileID) (<-chan []byte, <-chan error) {
 	file := s.files[fileId]
 	if file == nil {
-		data := make(chan []byte)
-		err := make(chan error)
+		dataCh := make(chan []byte)
+		errCh := make(chan error)
 		go func() {
-			close(data)
-			err <- ErrStorageFileNotFound
-			close(err)
+			close(dataCh)
+			errCh <- ErrStorageFileNotFound
+			close(errCh)
 		}()
-		return data, err
+		return dataCh, errCh
 	}
 	return s.bs.ReadBlobs(file.Blobs)
 }
