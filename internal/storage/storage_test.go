@@ -3,13 +3,17 @@ package storage
 import (
 	"bytes"
 	"errors"
+	"os"
 	"testing"
 )
 
 func getStorage(t *testing.T) *Storage {
 	t.Helper()
 
-	s, err := MakeStorage(t.TempDir())
+	var dir = t.TempDir()
+	// var dir = "teststorage"
+	s, err := MakeStorage(dir)
+
 	if err != nil {
 		t.Fatalf("cannot create storage: %v", err)
 	}
@@ -192,5 +196,39 @@ func TestRename(t *testing.T) {
 			file2.Name,
 			"Book",
 		)
+	}
+}
+
+func TestUploadMovie(t *testing.T) {
+	s := getStorage(t)
+	filename := "/Users/semeninrussia/Desktop/movie.mov"
+	data, err := os.ReadFile(filename)
+
+	if err != nil {
+		t.Fatalf("Cannot open movie.mov file: %v", err)
+	}
+
+	kotik, err := s.AddUser("Kotik")
+	if err != nil {
+		t.Fatalf("cannot add user Kotik: %v", err)
+	}
+
+	file, err := s.Upload(
+		kotik.ID,
+		"Movie!",
+		"TXT",
+		data,
+	)
+	if err != nil {
+		t.Fatalf("cannot upload movie: %v", err)
+	}
+
+	got, err := readAll(t, s, file.ID)
+	if err != nil {
+		t.Fatalf("cannot read stored movie: %v", err)
+	}
+
+	if !bytes.Equal(got, data) {
+		t.Fatalf("read unexpeced movie")
 	}
 }

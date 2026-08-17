@@ -3,9 +3,13 @@ package storage
 import (
 	"errors"
 	"gopherdisk/internal/blobs"
+	"sync"
 
 	"github.com/google/uuid"
 )
+
+var MAX_PART_SIZE = blobs.BLOB_MAX_SIZE
+var ErrStorageFileNotFound = errors.New("Could not find a file in storage")
 
 type FileID string
 type UserID string
@@ -46,7 +50,7 @@ func MakeStorage(path string) (*Storage, error) {
 }
 
 func (s *Storage) AddUser(name string) (*User, error) {
-	id := UserID(uuid.New().String())
+	id := GenerateUserID()
 	u := User{
 		ID:   id,
 		Name: name,
@@ -55,8 +59,16 @@ func (s *Storage) AddUser(name string) (*User, error) {
 	return &u, nil
 }
 
+func GenerateUserID() UserID {
+	return UserID(uuid.New().String())
+}
+
 func (s *Storage) GetUser(userId UserID) *User {
 	return s.users[userId]
+}
+
+func GenerateFileID() FileID {
+	return FileID(uuid.New().String())
 }
 
 func (s *Storage) GetFile(fileId FileID) *File {
@@ -69,26 +81,63 @@ func (s *Storage) Upload(
 	fileType FileKind,
 	data []byte,
 ) (*File, error) {
-	blobs, err := s.bs.AddData(data)
+	file := s.PreUpload(ownerId, name, fileType, len(data))
 
-	if err != nil {
-		return nil, err
+	i := 0
+	var wg sync.WaitGroup
+	var err error
+
+	for arr := range blobs.SplitDataOnChunks(data) {
+		wg.Add(1)
+		go func(i int) {
+			_, err = s.UploadPart(file.ID, i, arr)
+			wg.Done()
+		}(i)
+		i += 1
 	}
 
-	f := File{
-		ID:       FileID(uuid.New().String()),
+	wg.Wait()
+
+	return s.GetFile(file.ID), err
+}
+
+func (s *Storage) PreUpload(
+	ownerId UserID,
+	name string,
+	fileType FileKind,
+	size int,
+) *File {
+	nChunks := blobs.ComputeChunksAmount(size)
+
+	file := File{
+		ID:       GenerateFileID(),
 		Name:     name,
 		Filetype: fileType,
 		OwnerID:  ownerId,
-		Blobs:    blobs,
+		Blobs:    make([]blobs.Blob, nChunks),
 	}
 
-	s.files[f.ID] = &f
+	s.files[file.ID] = &file
 
-	return &f, nil
+	return &file
 }
 
-var ErrStorageFileNotFound = errors.New("Could not find a file in storage")
+func (s *Storage) UploadPart(
+	fileId FileID,
+	partNumber int, data []byte,
+) (blob *blobs.Blob, err error) {
+	blob, err = s.bs.AddOneChunk(data)
+	if err != nil {
+		return
+	}
+
+	_, err = s.changeFile(fileId, func(file *File) error {
+		file.Blobs[partNumber] = *blob
+		return nil
+	})
+
+	return
+}
 
 func (s *Storage) Delete(fileId FileID) error {
 	file := s.files[fileId]

@@ -6,6 +6,7 @@ package blobs
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,7 @@ import (
 )
 
 var BLOB_MAX_SIZE int = 16 * 1024 * 1024 // 16MB
+var ErrBlobOverflow = errors.New("probided data for one blob is more than expected")
 
 type BlobStorage struct {
 	Path string
@@ -34,7 +36,8 @@ func MakeBlobStorage(path string) (*BlobStorage, error) {
 
 // write data to correct file on file system, return hash of given data
 func (bs *BlobStorage) AddData(data []byte) ([]Blob, error) {
-	blobs := make([]Blob, (len(data)+BLOB_MAX_SIZE-1)/BLOB_MAX_SIZE)
+	size := len(data)
+	blobs := make([]Blob, ComputeChunksAmount(size))
 
 	i := 0
 	var err error
@@ -45,11 +48,11 @@ func (bs *BlobStorage) AddData(data []byte) ([]Blob, error) {
 
 		go func(i int) {
 			defer wg.Done()
-			var e error
-			blobs[i], e = bs.addOneBlob(arr)
+			bl, e := bs.AddOneChunk(arr)
 			if e != nil {
 				err = e
 			}
+			blobs[i] = *bl
 		}(i)
 
 		i += 1
@@ -77,12 +80,14 @@ func SplitDataOnChunks(data []byte) chan []byte {
 	return ch
 }
 
-func (bs *BlobStorage) addOneBlob(data []byte) (Blob, error) {
+func (bs *BlobStorage) AddOneChunk(data []byte) (*Blob, error) {
 	size := len(data)
-	// assert(size <= BLOB_MAX_SIZE)
+	if size > BLOB_MAX_SIZE {
+		return nil, ErrBlobOverflow
+	}
 	hash := computeHash(data)
 	blob := Blob{Hash: hash, Size: size}
-	return blob, bs.writeFile(hash, data, 0644)
+	return &blob, bs.writeFile(hash, data, 0644)
 }
 
 func (bs *BlobStorage) DeleteBob(blob Blob) error {
@@ -124,6 +129,10 @@ func (bs *BlobStorage) ReadBlob(blob Blob) ([]byte, error) {
 	}
 
 	return res, nil
+}
+
+func ComputeChunksAmount(size int) int {
+	return (size + BLOB_MAX_SIZE - 1) / BLOB_MAX_SIZE
 }
 
 // internal
