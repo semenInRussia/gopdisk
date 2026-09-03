@@ -132,7 +132,7 @@ func (s *Storage) PreUpload(
 
 func (s *Storage) UploadPart(
 	fileId FileID,
-	partNumber int, data []byte,
+	partPosition int, data []byte,
 ) (blob *blobs.Blob, err error) {
 	blob, err = s.bs.AddOneChunk(data)
 	if err != nil {
@@ -140,7 +140,7 @@ func (s *Storage) UploadPart(
 	}
 
 	_, err = s.changeFile(fileId, func(file *File) error {
-		file.Blobs[partNumber] = *blob
+		file.Blobs[partPosition] = *blob
 		return nil
 	})
 

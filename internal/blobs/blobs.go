@@ -50,7 +50,7 @@ func (bs *BlobStorage) AddData(data []byte) ([]Blob, error) {
 			defer wg.Done()
 			bl, e := bs.AddOneChunk(arr)
 			errCh <- e
-			if e != nil {
+			if e == nil {
 				blobs[i] = *bl
 			}
 		}(i)
