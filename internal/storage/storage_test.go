@@ -16,7 +16,7 @@ func getStorage(t *testing.T) *Storage {
 	t.Helper()
 
 	db := getDatabase(t)
-	var dir = t.TempDir()
+	dir := t.TempDir()
 	s, err := MakeStorage(dir, db)
 
 	if err != nil {
@@ -149,6 +149,37 @@ func TestReadNotFound(t *testing.T) {
 	}
 }
 
+func TestDeleteReturnsDatabaseErrorInsteadOfNotFound(t *testing.T) {
+	s := getStorage(t)
+
+	kotik, err := s.AddUser("Kotik")
+	if err != nil {
+		t.Fatalf("cannot add user Kotik: %v", err)
+	}
+
+	file, err := s.Upload(
+		kotik.ID,
+		"Notebook",
+		"TXT",
+		[]byte("Hi man!"),
+	)
+	if err != nil {
+		t.Fatalf("cannot upload Notebook: %v", err)
+	}
+
+	if err := s.db.Close(); err != nil {
+		t.Fatalf("cannot close database: %v", err)
+	}
+
+	err = s.Delete(file.ID)
+	if err == nil {
+		t.Fatal("expected database error")
+	}
+	if errors.Is(err, ErrStorageFileNotFound) {
+		t.Fatalf("got file not found error after database failure: %v", err)
+	}
+}
+
 func TestDelete(t *testing.T) {
 	s := getStorage(t)
 
@@ -175,6 +206,33 @@ func TestDelete(t *testing.T) {
 
 	if !errors.Is(err, ErrStorageFileNotFound) {
 		t.Fatalf("Notebook was not deleted")
+	}
+}
+
+func TestUploadPartRejectsPositionOutsideDeclaredFileSize(t *testing.T) {
+	s := getStorage(t)
+
+	kotik, err := s.AddUser("Kotik")
+	if err != nil {
+		t.Fatalf("cannot add user Kotik: %v", err)
+	}
+
+	file, err := s.PreUpload(kotik.ID, "Notebook", "TXT", 1)
+	if err != nil {
+		t.Fatalf("cannot create pre-upload file: %v", err)
+	}
+
+	_, err = s.UploadPart(file.ID, 1, []byte("extra"))
+	if err == nil {
+		t.Fatal("expected error for upload part outside declared file size")
+	}
+
+	loaded := s.loadFile(file.ID, FileStatusUploading)
+	if loaded == nil {
+		t.Fatal("cannot load uploading file")
+	}
+	if len(loaded.Blobs) != 0 {
+		t.Fatalf("got %d attached blobs, expected 0", len(loaded.Blobs))
 	}
 }
 

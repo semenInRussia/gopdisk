@@ -107,16 +107,17 @@ func (bs *BlobStorage) ReadBlobs(blobs []Blob) (<-chan []byte, <-chan error) {
 	err := make(chan error)
 
 	go func() {
-		defer close(data)
 		defer close(err)
 		for _, bl := range blobs {
 			d, e := bs.ReadBlob(bl)
 			if e != nil {
+				close(data)
 				err <- e
 				return
 			}
 			data <- d
 		}
+		close(data)
 	}()
 
 	return data, err

@@ -13,6 +13,7 @@ import (
 var MaxPartSize = blobs.BlobsMaxSize
 var ErrStorageFileNotFound = errors.New("Could not find a file in storage")
 var ErrStorageDatabaseRequired = errors.New("database connection is required")
+var ErrIndexOutOfBounds = errors.New("index out of bounds")
 
 type FileID string
 type UserID string
@@ -190,13 +191,16 @@ func (s *Storage) UploadPart(
 }
 
 func (s *Storage) Delete(fileId FileID) error {
-	file := s.loadFile(fileId, "")
+	file, err := s.loadFileResult(fileId, "")
+	if err != nil {
+		return err
+	}
 
 	if file == nil {
 		return ErrStorageFileNotFound
 	}
 
-	_, err := s.db.ExecContext(
+	_, err = s.db.ExecContext(
 		context.Background(),
 		`DELETE FROM files WHERE id = $1`,
 		fileId,
@@ -281,6 +285,14 @@ func (s *Storage) loadUser(userId UserID) *User {
 }
 
 func (s *Storage) loadFile(fileId FileID, status FileStatus) *File {
+	file, err := s.loadFileResult(fileId, status)
+	if err != nil {
+		return nil
+	}
+	return file
+}
+
+func (s *Storage) loadFileResult(fileId FileID, status FileStatus) (*File, error) {
 	query := `SELECT id, name, filetype, owner_id, status FROM files WHERE id = $1`
 	args := []any{fileId}
 	if status != "" {
@@ -292,7 +304,10 @@ func (s *Storage) loadFile(fileId FileID, status FileStatus) *File {
 
 	var file File
 	if err := row.Scan(&file.ID, &file.Name, &file.Filetype, &file.OwnerID, &file.Status); err != nil {
-		return nil
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
 	}
 
 	rows, err := s.db.QueryContext(
@@ -301,23 +316,23 @@ func (s *Storage) loadFile(fileId FileID, status FileStatus) *File {
 		fileId,
 	)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
 
 	for rows.Next() {
 		var blob blobs.Blob
 		if err := rows.Scan(&blob.Hash, &blob.Size); err != nil {
-			return nil
+			return nil, err
 		}
 		file.Blobs = append(file.Blobs, blob)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil
+		return nil, err
 	}
 
-	return &file
+	return &file, nil
 }
 
 func (s *Storage) replaceFileBlobs(file *File, size int) error {
@@ -354,9 +369,20 @@ func (s *Storage) replaceFileBlobs(file *File, size int) error {
 }
 
 func (s *Storage) saveUploadedBlob(fileId FileID, position int, blob blobs.Blob) error {
-	file := s.loadFile(fileId, FileStatusUploading)
+	file, err := s.loadFileResult(fileId, FileStatusUploading)
+	if err != nil {
+		return err
+	}
 	if file == nil {
 		return ErrStorageFileNotFound
+	}
+
+	chunksAmount, err := s.loadFileChunksAmount(fileId)
+	if err != nil {
+		return err
+	}
+	if position < 0 || position >= chunksAmount {
+		return ErrIndexOutOfBounds
 	}
 
 	tx, err := s.db.BeginTx(context.Background(), nil)
@@ -384,6 +410,24 @@ func (s *Storage) saveUploadedBlob(fileId FileID, position int, blob blobs.Blob)
 	}
 
 	return tx.Commit()
+}
+
+func (s *Storage) loadFileChunksAmount(fileId FileID) (int, error) {
+	row := s.db.QueryRowContext(
+		context.Background(),
+		`SELECT size FROM files WHERE id = $1`,
+		fileId,
+	)
+
+	var size int
+	if err := row.Scan(&size); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, ErrStorageFileNotFound
+		}
+		return 0, err
+	}
+
+	return blobs.ComputeChunksAmount(size), nil
 }
 
 func (s *Storage) markFileReady(fileId FileID) error {
