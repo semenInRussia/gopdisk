@@ -1,0 +1,5 @@
+ALTER TABLE files
+DROP CONSTRAINT IF EXISTS files_status_check;
+
+ALTER TABLE files
+DROP COLUMN IF EXISTS status;

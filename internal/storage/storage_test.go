@@ -2,23 +2,48 @@ package storage
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
 	"errors"
+	"gopherdisk/internal/database"
 	"os"
 	"testing"
 )
 
+const databaseTestURLEnv = "GOPHERDISK_DATABASE_TEST_URL"
+
 func getStorage(t *testing.T) *Storage {
 	t.Helper()
 
+	db := getDatabase(t)
 	var dir = t.TempDir()
-	// var dir = "teststorage"
-	s, err := MakeStorage(dir)
+	s, err := MakeStorage(dir, db)
 
 	if err != nil {
 		t.Fatalf("cannot create storage: %v", err)
 	}
 
 	return s
+}
+
+func getDatabase(t *testing.T) *sql.DB {
+	t.Helper()
+
+	databaseURL := os.Getenv(databaseTestURLEnv)
+	if databaseURL == "" {
+		t.Skipf("set %s to run storage tests", databaseTestURLEnv)
+	}
+
+	db, err := database.Open(context.Background(), databaseURL)
+	if err != nil {
+		t.Fatalf("cannot open database: %v", err)
+	}
+
+	t.Cleanup(func() {
+		db.Close()
+	})
+
+	return db
 }
 
 func readAll(t *testing.T, s *Storage, fileID FileID) ([]byte, error) {

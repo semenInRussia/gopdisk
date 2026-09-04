@@ -8,8 +8,6 @@ import (
 	"gopherdisk/internal/database"
 )
 
-const databaseTestURLEnv = "GOPHERDISK_DATABASE_TEST_URL"
-
 func TestPostgresStoragePersistsAndLoadsFile(t *testing.T) {
 	databaseURL := os.Getenv(databaseTestURLEnv)
 	if databaseURL == "" {
@@ -23,7 +21,7 @@ func TestPostgresStoragePersistsAndLoadsFile(t *testing.T) {
 	defer db.Close()
 
 	dir := t.TempDir()
-	s, err := MakePostgresStorage(dir, db)
+	s, err := MakeStorage(dir, db)
 	if err != nil {
 		t.Fatalf("cannot create postgres storage: %v", err)
 	}
@@ -48,7 +46,7 @@ func TestPostgresStoragePersistsAndLoadsFile(t *testing.T) {
 		}
 	})
 
-	loadedStorage, err := MakePostgresStorage(dir, db)
+	loadedStorage, err := MakeStorage(dir, db)
 	if err != nil {
 		t.Fatalf("cannot create second postgres storage: %v", err)
 	}
@@ -80,7 +78,7 @@ func TestPostgresStoragePersistsAndLoadsFile(t *testing.T) {
 		t.Fatalf("got name %q, expected %q", renamed.Name, "renamed-db-file")
 	}
 
-	afterRenameStorage, err := MakePostgresStorage(dir, db)
+	afterRenameStorage, err := MakeStorage(dir, db)
 	if err != nil {
 		t.Fatalf("cannot create storage after rename: %v", err)
 	}
@@ -103,7 +101,7 @@ func TestPostgresStoragePersistsAndLoadsFile(t *testing.T) {
 		})
 	}
 
-	afterUpdateStorage, err := MakePostgresStorage(dir, db)
+	afterUpdateStorage, err := MakeStorage(dir, db)
 	if err != nil {
 		t.Fatalf("cannot create storage after update: %v", err)
 	}
@@ -119,7 +117,7 @@ func TestPostgresStoragePersistsAndLoadsFile(t *testing.T) {
 		t.Fatalf("cannot delete file: %v", err)
 	}
 
-	afterDeleteStorage, err := MakePostgresStorage(dir, db)
+	afterDeleteStorage, err := MakeStorage(dir, db)
 	if err != nil {
 		t.Fatalf("cannot create storage after delete: %v", err)
 	}
