@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"gopherdisk/internal/blobs"
 	"gopherdisk/internal/database"
 	"os"
 	"testing"
@@ -132,6 +133,50 @@ func TestUploadAndRead(t *testing.T) {
 			data,
 			notebookText,
 		)
+	}
+}
+
+func TestPreUploadPartsFinishAndRead(t *testing.T) {
+	previousMaxPartSize := blobs.BlobsMaxSize
+	blobs.BlobsMaxSize = 4
+	t.Cleanup(func() {
+		blobs.BlobsMaxSize = previousMaxPartSize
+	})
+
+	s := getStorage(t)
+
+	kotik, err := s.AddUser("Kotik")
+	if err != nil {
+		t.Fatalf("cannot add user Kotik: %v", err)
+	}
+
+	file, err := s.PreUpload(kotik.ID, "Notebook", "TXT", len("hello-world"))
+	if err != nil {
+		t.Fatalf("cannot create pre-upload file: %v", err)
+	}
+
+	parts := [][]byte{
+		[]byte("hell"),
+		[]byte("o-wo"),
+		[]byte("rld"),
+	}
+	for i, part := range parts {
+		if _, err := s.UploadPart(file.ID, i, part); err != nil {
+			t.Fatalf("cannot upload part %d: %v", i, err)
+		}
+	}
+
+	if err := s.FinishUpload(file.ID); err != nil {
+		t.Fatalf("cannot finish upload: %v", err)
+	}
+
+	got, err := readAll(t, s, file.ID)
+	if err != nil {
+		t.Fatalf("cannot read finished file: %v", err)
+	}
+
+	if !bytes.Equal(got, []byte("hello-world")) {
+		t.Fatalf("got %q, expected %q", got, "hello-world")
 	}
 }
 

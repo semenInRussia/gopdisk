@@ -11,9 +11,10 @@ import (
 )
 
 var MaxPartSize = blobs.BlobsMaxSize
+var ErrEarlyFinishUpload = errors.New("Finishing uploading before each parst was upload")
 var ErrStorageFileNotFound = errors.New("Could not find a file in storage")
-var ErrStorageDatabaseRequired = errors.New("database connection is required")
-var ErrIndexOutOfBounds = errors.New("index out of bounds")
+var ErrStorageDatabaseRequired = errors.New("Database connection is required")
+var ErrIndexOutOfBounds = errors.New("Index out of bounds")
 
 type FileID string
 type UserID string
@@ -37,6 +38,7 @@ type File struct {
 	OwnerID  UserID
 	Status   FileStatus
 	Blobs    []blobs.Blob
+	Size     int
 }
 
 type Storage struct {
@@ -133,7 +135,7 @@ func (s *Storage) Upload(
 		}
 	}
 
-	if err := s.markFileReady(file.ID); err != nil {
+	if err := s.FinishUpload(file.ID); err != nil {
 		_ = s.Delete(file.ID)
 		return nil, err
 	}
@@ -156,6 +158,7 @@ func (s *Storage) PreUpload(
 		OwnerID:  ownerId,
 		Status:   FileStatusUploading,
 		Blobs:    make([]blobs.Blob, nChunks),
+		Size:     size,
 	}
 
 	_, err := s.db.ExecContext(
@@ -188,6 +191,27 @@ func (s *Storage) UploadPart(
 	err = s.saveUploadedBlob(fileId, partPosition, *blob)
 
 	return
+}
+
+func (s *Storage) FinishUpload(fileId FileID) error {
+	file, err := s.loadFileResult(fileId, FileStatusUploading)
+	if err != nil {
+		return err
+	}
+	if file == nil {
+		return ErrStorageFileNotFound
+	}
+
+	sz := 0
+	for _, b := range file.Blobs {
+		sz += b.Size
+	}
+
+	if sz != file.Size {
+		return ErrEarlyFinishUpload
+	}
+
+	return s.markFileReady(fileId)
 }
 
 func (s *Storage) Delete(fileId FileID) error {
