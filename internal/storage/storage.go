@@ -64,7 +64,7 @@ func MakeStorage(path string, db *sql.DB) (*Storage, error) {
 	return &s, nil
 }
 
-func (s *Storage) AddUser(name string) (*User, error) {
+func (s *Storage) AddUser(ctx context.Context, name string) (*User, error) {
 	id := GenerateUserID()
 	u := User{
 		ID:   id,
@@ -72,7 +72,7 @@ func (s *Storage) AddUser(name string) (*User, error) {
 	}
 
 	_, err := s.db.ExecContext(
-		context.Background(),
+		ctx,
 		`INSERT INTO users (id, name) VALUES ($1, $2)`,
 		u.ID,
 		u.Name,
@@ -88,25 +88,26 @@ func GenerateUserID() UserID {
 	return UserID(uuid.New().String())
 }
 
-func (s *Storage) GetUser(userId UserID) *User {
-	return s.loadUser(userId)
+func (s *Storage) GetUser(ctx context.Context, userId UserID) *User {
+	return s.loadUser(ctx, userId)
 }
 
 func GenerateFileID() FileID {
 	return FileID(uuid.New().String())
 }
 
-func (s *Storage) GetFile(fileId FileID) *File {
-	return s.loadFile(fileId, FileStatusReady)
+func (s *Storage) GetFile(ctx context.Context, fileId FileID) *File {
+	return s.loadFile(ctx, fileId, FileStatusReady)
 }
 
 func (s *Storage) Upload(
+	ctx context.Context,
 	ownerId UserID,
 	name string,
 	fileType FileKind,
 	data []byte,
 ) (*File, error) {
-	file, err := s.PreUpload(ownerId, name, fileType, len(data))
+	file, err := s.PreUpload(ctx, ownerId, name, fileType, len(data))
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +120,7 @@ func (s *Storage) Upload(
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, err := s.UploadPart(file.ID, i, arr)
+			_, err := s.UploadPart(ctx, file.ID, i, arr)
 			errCh <- err
 		}(i)
 		i += 1
@@ -130,20 +131,21 @@ func (s *Storage) Upload(
 
 	for err := range errCh {
 		if err != nil {
-			_ = s.Delete(file.ID)
+			_ = s.Delete(context.WithoutCancel(ctx), file.ID)
 			return nil, err
 		}
 	}
 
-	if err := s.FinishUpload(file.ID); err != nil {
-		_ = s.Delete(file.ID)
+	if err := s.FinishUpload(ctx, file.ID); err != nil {
+		_ = s.Delete(context.WithoutCancel(ctx), file.ID)
 		return nil, err
 	}
 
-	return s.GetFile(file.ID), nil
+	return s.GetFile(ctx, file.ID), nil
 }
 
 func (s *Storage) PreUpload(
+	ctx context.Context,
 	ownerId UserID,
 	name string,
 	fileType FileKind,
@@ -162,7 +164,7 @@ func (s *Storage) PreUpload(
 	}
 
 	_, err := s.db.ExecContext(
-		context.Background(),
+		ctx,
 		`INSERT INTO files (id, name, owner_id, filetype, size, status)
 		VALUES ($1, $2, $3, $4, $5, $6)`,
 		file.ID,
@@ -180,21 +182,30 @@ func (s *Storage) PreUpload(
 }
 
 func (s *Storage) UploadPart(
+	ctx context.Context,
 	fileId FileID,
 	partPosition int, data []byte,
 ) (blob *blobs.Blob, err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	blob, err = s.bs.AddOneChunk(data)
 	if err != nil {
 		return
 	}
 
-	err = s.saveUploadedBlob(fileId, partPosition, *blob)
+	err = s.saveUploadedBlob(ctx, fileId, partPosition, *blob)
 
 	return
 }
 
-func (s *Storage) FinishUpload(fileId FileID) error {
-	file, err := s.loadFileResult(fileId, FileStatusUploading)
+func (s *Storage) FinishUpload(ctx context.Context, fileId FileID) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	file, err := s.loadFileResult(ctx, fileId, FileStatusUploading)
 	if err != nil {
 		return err
 	}
@@ -211,11 +222,11 @@ func (s *Storage) FinishUpload(fileId FileID) error {
 		return ErrEarlyFinishUpload
 	}
 
-	return s.markFileReady(fileId)
+	return s.markFileReady(ctx, fileId)
 }
 
-func (s *Storage) Delete(fileId FileID) error {
-	file, err := s.loadFileResult(fileId, "")
+func (s *Storage) Delete(ctx context.Context, fileId FileID) error {
+	file, err := s.loadFileResult(ctx, fileId, "")
 	if err != nil {
 		return err
 	}
@@ -225,7 +236,7 @@ func (s *Storage) Delete(fileId FileID) error {
 	}
 
 	_, err = s.db.ExecContext(
-		context.Background(),
+		ctx,
 		`DELETE FROM files WHERE id = $1`,
 		fileId,
 	)
@@ -236,14 +247,14 @@ func (s *Storage) Delete(fileId FileID) error {
 	return nil
 }
 
-func (s *Storage) Rename(fileId FileID, newName string) (*File, error) {
-	file := s.GetFile(fileId)
+func (s *Storage) Rename(ctx context.Context, fileId FileID, newName string) (*File, error) {
+	file := s.GetFile(ctx, fileId)
 	if file == nil {
 		return nil, ErrStorageFileNotFound
 	}
 
 	_, err := s.db.ExecContext(
-		context.Background(),
+		ctx,
 		`UPDATE files SET name = $1 WHERE id = $2 AND status = $3`,
 		newName,
 		fileId,
@@ -257,12 +268,15 @@ func (s *Storage) Rename(fileId FileID, newName string) (*File, error) {
 	return file, nil
 }
 
-func (s *Storage) UpdateData(fileId FileID, newData []byte) (*File, error) {
-	file := s.GetFile(fileId)
+func (s *Storage) UpdateData(ctx context.Context, fileId FileID, newData []byte) (*File, error) {
+	file := s.GetFile(ctx, fileId)
 	if file == nil {
 		return nil, ErrStorageFileNotFound
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	newBlobs, err := s.bs.AddData(newData)
 	if err != nil {
 		return nil, err
@@ -270,7 +284,7 @@ func (s *Storage) UpdateData(fileId FileID, newData []byte) (*File, error) {
 
 	updatedFile := *file
 	updatedFile.Blobs = newBlobs
-	if err := s.replaceFileBlobs(&updatedFile, len(newData)); err != nil {
+	if err := s.replaceFileBlobs(ctx, &updatedFile, len(newData)); err != nil {
 		return nil, err
 	}
 
@@ -278,11 +292,20 @@ func (s *Storage) UpdateData(fileId FileID, newData []byte) (*File, error) {
 	return file, nil
 }
 
-func (s *Storage) Read(fileId FileID) (<-chan []byte, <-chan error) {
-	file := s.GetFile(fileId)
+func (s *Storage) Read(ctx context.Context, fileId FileID) (<-chan []byte, <-chan error) {
+	if err := ctx.Err(); err != nil {
+		dataCh := make(chan []byte)
+		errCh := make(chan error, 1)
+		close(dataCh)
+		errCh <- err
+		close(errCh)
+		return dataCh, errCh
+	}
+
+	file := s.GetFile(ctx, fileId)
 	if file == nil {
 		dataCh := make(chan []byte)
-		errCh := make(chan error)
+		errCh := make(chan error, 1)
 		go func() {
 			close(dataCh)
 			errCh <- ErrStorageFileNotFound
@@ -293,9 +316,9 @@ func (s *Storage) Read(fileId FileID) (<-chan []byte, <-chan error) {
 	return s.bs.ReadBlobs(file.Blobs)
 }
 
-func (s *Storage) loadUser(userId UserID) *User {
+func (s *Storage) loadUser(ctx context.Context, userId UserID) *User {
 	row := s.db.QueryRowContext(
-		context.Background(),
+		ctx,
 		`SELECT id, name FROM users WHERE id = $1`,
 		userId,
 	)
@@ -308,15 +331,15 @@ func (s *Storage) loadUser(userId UserID) *User {
 	return &user
 }
 
-func (s *Storage) loadFile(fileId FileID, status FileStatus) *File {
-	file, err := s.loadFileResult(fileId, status)
+func (s *Storage) loadFile(ctx context.Context, fileId FileID, status FileStatus) *File {
+	file, err := s.loadFileResult(ctx, fileId, status)
 	if err != nil {
 		return nil
 	}
 	return file
 }
 
-func (s *Storage) loadFileResult(fileId FileID, status FileStatus) (*File, error) {
+func (s *Storage) loadFileResult(ctx context.Context, fileId FileID, status FileStatus) (*File, error) {
 	query := `SELECT id, name, filetype, owner_id, status FROM files WHERE id = $1`
 	args := []any{fileId}
 	if status != "" {
@@ -324,7 +347,7 @@ func (s *Storage) loadFileResult(fileId FileID, status FileStatus) (*File, error
 		args = append(args, status)
 	}
 
-	row := s.db.QueryRowContext(context.Background(), query, args...)
+	row := s.db.QueryRowContext(ctx, query, args...)
 
 	var file File
 	if err := row.Scan(&file.ID, &file.Name, &file.Filetype, &file.OwnerID, &file.Status); err != nil {
@@ -335,7 +358,7 @@ func (s *Storage) loadFileResult(fileId FileID, status FileStatus) (*File, error
 	}
 
 	rows, err := s.db.QueryContext(
-		context.Background(),
+		ctx,
 		`SELECT blob_hash, blob_size FROM file_blob_view WHERE file_id = $1 ORDER BY position`,
 		fileId,
 	)
@@ -359,15 +382,19 @@ func (s *Storage) loadFileResult(fileId FileID, status FileStatus) (*File, error
 	return &file, nil
 }
 
-func (s *Storage) replaceFileBlobs(file *File, size int) error {
-	tx, err := s.db.BeginTx(context.Background(), nil)
+func (s *Storage) replaceFileBlobs(ctx context.Context, file *File, size int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
 	_, err = tx.ExecContext(
-		context.Background(),
+		ctx,
 		`UPDATE files SET size = $1 WHERE id = $2`,
 		size,
 		file.ID,
@@ -377,7 +404,7 @@ func (s *Storage) replaceFileBlobs(file *File, size int) error {
 	}
 
 	_, err = tx.ExecContext(
-		context.Background(),
+		ctx,
 		`DELETE FROM file_blobs WHERE file_id = $1`,
 		file.ID,
 	)
@@ -385,15 +412,15 @@ func (s *Storage) replaceFileBlobs(file *File, size int) error {
 		return err
 	}
 
-	if err := saveFileBlobs(context.Background(), tx, file); err != nil {
+	if err := saveFileBlobs(ctx, tx, file); err != nil {
 		return err
 	}
 
 	return tx.Commit()
 }
 
-func (s *Storage) saveUploadedBlob(fileId FileID, position int, blob blobs.Blob) error {
-	file, err := s.loadFileResult(fileId, FileStatusUploading)
+func (s *Storage) saveUploadedBlob(ctx context.Context, fileId FileID, position int, blob blobs.Blob) error {
+	file, err := s.loadFileResult(ctx, fileId, FileStatusUploading)
 	if err != nil {
 		return err
 	}
@@ -401,7 +428,7 @@ func (s *Storage) saveUploadedBlob(fileId FileID, position int, blob blobs.Blob)
 		return ErrStorageFileNotFound
 	}
 
-	chunksAmount, err := s.loadFileChunksAmount(fileId)
+	chunksAmount, err := s.loadFileChunksAmount(ctx, fileId)
 	if err != nil {
 		return err
 	}
@@ -409,18 +436,18 @@ func (s *Storage) saveUploadedBlob(fileId FileID, position int, blob blobs.Blob)
 		return ErrIndexOutOfBounds
 	}
 
-	tx, err := s.db.BeginTx(context.Background(), nil)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	if err := saveBlob(context.Background(), tx, blob); err != nil {
+	if err := saveBlob(ctx, tx, blob); err != nil {
 		return err
 	}
 
 	_, err = tx.ExecContext(
-		context.Background(),
+		ctx,
 		`INSERT INTO file_blobs (file_id, blob_hash, position)
 		VALUES ($1, $2, $3)
 		ON CONFLICT (file_id, position)
@@ -436,9 +463,9 @@ func (s *Storage) saveUploadedBlob(fileId FileID, position int, blob blobs.Blob)
 	return tx.Commit()
 }
 
-func (s *Storage) loadFileChunksAmount(fileId FileID) (int, error) {
+func (s *Storage) loadFileChunksAmount(ctx context.Context, fileId FileID) (int, error) {
 	row := s.db.QueryRowContext(
-		context.Background(),
+		ctx,
 		`SELECT size FROM files WHERE id = $1`,
 		fileId,
 	)
@@ -454,9 +481,9 @@ func (s *Storage) loadFileChunksAmount(fileId FileID) (int, error) {
 	return blobs.ComputeChunksAmount(size), nil
 }
 
-func (s *Storage) markFileReady(fileId FileID) error {
+func (s *Storage) markFileReady(ctx context.Context, fileId FileID) error {
 	_, err := s.db.ExecContext(
-		context.Background(),
+		ctx,
 		`UPDATE files SET status = $1 WHERE id = $2 AND status = $3`,
 		FileStatusReady,
 		fileId,
