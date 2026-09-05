@@ -331,6 +331,47 @@ func (s *Storage) loadUser(ctx context.Context, userId UserID) *User {
 	return &user
 }
 
+func (s *Storage) CollectGarbageBlobs(ctx context.Context) (int, error) {
+	query := `
+		DELETE FROM blobs b
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM file_blobs fb
+			WHERE fb.blob_hash = b.hash
+		)
+		returning b.hash, b.size
+	`
+
+	rows, err := s.db.QueryContext(ctx, query)
+
+	if err != nil {
+		return 0, err
+	}
+
+	defer rows.Close()
+
+	cnt := 0
+
+	for rows.Next() {
+		var blob blobs.Blob
+		err := rows.Scan(&blob.Hash, &blob.Size)
+		if err != nil {
+			return 0, err
+		}
+		err = s.bs.DeleteBlob(blob)
+		if err != nil {
+			return cnt, err
+		}
+		cnt += 1
+	}
+
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	return cnt, nil
+}
+
 func (s *Storage) loadFile(ctx context.Context, fileId FileID, status FileStatus) *File {
 	file, err := s.loadFileResult(ctx, fileId, status)
 	if err != nil {
@@ -340,7 +381,7 @@ func (s *Storage) loadFile(ctx context.Context, fileId FileID, status FileStatus
 }
 
 func (s *Storage) loadFileResult(ctx context.Context, fileId FileID, status FileStatus) (*File, error) {
-	query := `SELECT id, name, filetype, owner_id, status FROM files WHERE id = $1`
+	query := `SELECT id, name, filetype, owner_id, status, size FROM files WHERE id = $1`
 	args := []any{fileId}
 	if status != "" {
 		query += ` AND status = $2`
@@ -350,7 +391,7 @@ func (s *Storage) loadFileResult(ctx context.Context, fileId FileID, status File
 	row := s.db.QueryRowContext(ctx, query, args...)
 
 	var file File
-	if err := row.Scan(&file.ID, &file.Name, &file.Filetype, &file.OwnerID, &file.Status); err != nil {
+	if err := row.Scan(&file.ID, &file.Name, &file.Filetype, &file.OwnerID, &file.Status, &file.Size); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}

@@ -8,10 +8,14 @@ import (
 	"gopherdisk/internal/blobs"
 	"gopherdisk/internal/database"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
-const databaseTestURLEnv = "GOPHERDISK_DATABASE_TEST_URL"
+const (
+	databaseTestURLEnv                  = "GOPHERDISK_DATABASE_TEST_URL"
+	garbageCollectionDatabaseTestURLEnv = "GOPHERDISK_GARBAGE_COLLECTION_TEST_URL"
+)
 
 func getStorage(t *testing.T) *Storage {
 	t.Helper()
@@ -291,6 +295,204 @@ func TestUploadPartRejectsPositionOutsideDeclaredFileSize(t *testing.T) {
 	if len(loaded.Blobs) != 0 {
 		t.Fatalf("got %d attached blobs, expected 0", len(loaded.Blobs))
 	}
+}
+
+func TestCollectGarbageBlobsDeletesUnreferencedBlob(t *testing.T) {
+	s := getGarbageCollectionStorage(t)
+
+	blob, err := s.bs.AddOneChunk([]byte("unused blob"))
+	if err != nil {
+		t.Fatalf("cannot write blob file: %v", err)
+	}
+
+	_, err = s.db.ExecContext(
+		context.Background(),
+		`INSERT INTO blobs (hash, size) VALUES ($1, $2)`,
+		blob.Hash,
+		blob.Size,
+	)
+	if err != nil {
+		t.Fatalf("cannot insert blob row: %v", err)
+	}
+
+	deleted, err := s.CollectGarbageBlobs(context.Background())
+	if err != nil {
+		t.Fatalf("cannot collect garbage blobs: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("got %d deleted blobs, expected 1", deleted)
+	}
+	if blobRowExists(t, s.db, blob.Hash) {
+		t.Fatalf("blob row %q still exists", blob.Hash)
+	}
+	if blobFileExists(t, s, *blob) {
+		t.Fatalf("blob file %q still exists", blob.Hash)
+	}
+}
+
+func TestCollectGarbageBlobsKeepsReferencedBlob(t *testing.T) {
+	s := getGarbageCollectionStorage(t)
+
+	kotik, err := s.AddUser(context.Background(), "Kotik")
+	if err != nil {
+		t.Fatalf("cannot add user Kotik: %v", err)
+	}
+
+	file, err := s.Upload(context.Background(), kotik.ID, "Notebook", "TXT", []byte("Hi man!"))
+	if err != nil {
+		t.Fatalf("cannot upload Notebook: %v", err)
+	}
+
+	deleted, err := s.CollectGarbageBlobs(context.Background())
+	if err != nil {
+		t.Fatalf("cannot collect garbage blobs: %v", err)
+	}
+	if deleted != 0 {
+		t.Fatalf("got %d deleted blobs, expected 0", deleted)
+	}
+
+	for _, blob := range file.Blobs {
+		if !blobRowExists(t, s.db, blob.Hash) {
+			t.Fatalf("referenced blob row %q was deleted", blob.Hash)
+		}
+		if !blobFileExists(t, s, blob) {
+			t.Fatalf("referenced blob file %q was deleted", blob.Hash)
+		}
+	}
+
+	got, err := readAll(t, s, file.ID)
+	if err != nil {
+		t.Fatalf("cannot read file after garbage collection: %v", err)
+	}
+	if !bytes.Equal(got, []byte("Hi man!")) {
+		t.Fatalf("got %q, expected %q", got, "Hi man!")
+	}
+}
+
+func TestCollectGarbageBlobsAfterDelete(t *testing.T) {
+	s := getGarbageCollectionStorage(t)
+
+	kotik, err := s.AddUser(context.Background(), "Kotik")
+	if err != nil {
+		t.Fatalf("cannot add user Kotik: %v", err)
+	}
+
+	file, err := s.Upload(context.Background(), kotik.ID, "Notebook", "TXT", []byte("delete garbage unique blob"))
+	if err != nil {
+		t.Fatalf("cannot upload Notebook: %v", err)
+	}
+
+	uniqueBlobs := uniqueFileBlobs(file)
+	if err := s.Delete(context.Background(), file.ID); err != nil {
+		t.Fatalf("cannot delete file: %v", err)
+	}
+
+	deleted, err := s.CollectGarbageBlobs(context.Background())
+	if err != nil {
+		t.Fatalf("cannot collect garbage blobs: %v", err)
+	}
+	if deleted != len(uniqueBlobs) {
+		t.Fatalf("got %d deleted blobs, expected %d", deleted, len(uniqueBlobs))
+	}
+
+	for _, blob := range uniqueBlobs {
+		if blobRowExists(t, s.db, blob.Hash) {
+			t.Fatalf("deleted file blob row %q still exists", blob.Hash)
+		}
+		if blobFileExists(t, s, blob) {
+			t.Fatalf("deleted file blob %q still exists on disk", blob.Hash)
+		}
+	}
+}
+
+func TestCollectGarbageBlobsReturnsFilesystemError(t *testing.T) {
+	s := getGarbageCollectionStorage(t)
+
+	missingBlob := blobs.Blob{Hash: "missing-physical-blob", Size: 4}
+	_, err := s.db.ExecContext(
+		context.Background(),
+		`INSERT INTO blobs (hash, size) VALUES ($1, $2)`,
+		missingBlob.Hash,
+		missingBlob.Size,
+	)
+	if err != nil {
+		t.Fatalf("cannot insert blob row: %v", err)
+	}
+
+	deleted, err := s.CollectGarbageBlobs(context.Background())
+	if err == nil {
+		t.Fatal("expected filesystem error")
+	}
+	if deleted != 0 {
+		t.Fatalf("got %d deleted blobs before error, expected 0", deleted)
+	}
+	if blobRowExists(t, s.db, missingBlob.Hash) {
+		t.Fatalf("blob row %q still exists", missingBlob.Hash)
+	}
+}
+
+func getGarbageCollectionStorage(t *testing.T) *Storage {
+	t.Helper()
+
+	databaseURL := os.Getenv(garbageCollectionDatabaseTestURLEnv)
+	if databaseURL == "" {
+		t.Skipf("set %s to run garbage collection storage tests", garbageCollectionDatabaseTestURLEnv)
+	}
+
+	db, err := database.Open(context.Background(), databaseURL)
+	if err != nil {
+		t.Fatalf("cannot open database: %v", err)
+	}
+	t.Cleanup(func() {
+		db.Close()
+	})
+
+	s, err := MakeStorage(t.TempDir(), db)
+	if err != nil {
+		t.Fatalf("cannot create storage: %v", err)
+	}
+
+	return s
+}
+
+func blobRowExists(t *testing.T, db *sql.DB, hash string) bool {
+	t.Helper()
+
+	row := db.QueryRowContext(context.Background(), `SELECT EXISTS (SELECT 1 FROM blobs WHERE hash = $1)`, hash)
+	var exists bool
+	if err := row.Scan(&exists); err != nil {
+		t.Fatalf("cannot check blob row: %v", err)
+	}
+	return exists
+}
+
+func blobFileExists(t *testing.T, s *Storage, blob blobs.Blob) bool {
+	t.Helper()
+
+	_, err := os.Stat(filepath.Join(s.bs.Path, blob.Hash))
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false
+	}
+	t.Fatalf("cannot stat blob file: %v", err)
+	return false
+}
+
+func uniqueFileBlobs(file *File) []blobs.Blob {
+	seen := make(map[string]bool)
+	var unique []blobs.Blob
+
+	for _, blob := range file.Blobs {
+		if seen[blob.Hash] {
+			continue
+		}
+		seen[blob.Hash] = true
+		unique = append(unique, blob)
+	}
+
+	return unique
 }
 
 func TestRename(t *testing.T) {
