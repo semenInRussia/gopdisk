@@ -1,3 +1,5 @@
+// TODO: use standalone `migrate` tool
+
 package main
 
 import (

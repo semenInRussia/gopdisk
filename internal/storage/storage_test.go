@@ -7,8 +7,10 @@ import (
 	"errors"
 	"gopherdisk/internal/blobs"
 	"gopherdisk/internal/database"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -196,6 +198,175 @@ func TestPreUploadPartsFinishAndRead(t *testing.T) {
 	}
 }
 
+func TestUploadReaderAndRead(t *testing.T) {
+	previousMaxPartSize := blobs.BlobsMaxSize
+	blobs.BlobsMaxSize = 4
+	t.Cleanup(func() {
+		blobs.BlobsMaxSize = previousMaxPartSize
+	})
+
+	s := getStorage(t)
+	user, err := s.AddUser(context.Background(), "Reader User")
+	if err != nil {
+		t.Fatalf("cannot add user: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		data string
+	}{
+		{name: "small", data: "abc"},
+		{name: "exact", data: "abcd"},
+		{name: "plus-one", data: "abcde"},
+	}
+
+	for _, tc := range cases {
+		file, err := s.UploadReader(context.Background(), user.ID, tc.name, "TXT", strings.NewReader(tc.data), len(tc.data))
+		if err != nil {
+			t.Fatalf("cannot upload %s: %v", tc.name, err)
+		}
+
+		got, err := readAll(t, s, file.ID)
+		if err != nil {
+			t.Fatalf("cannot read %s: %v", tc.name, err)
+		}
+		if string(got) != tc.data {
+			t.Fatalf("got %q, expected %q", got, tc.data)
+		}
+	}
+}
+
+func TestUpdateDataReaderKeepsOldContentWhenReaderFails(t *testing.T) {
+	previousMaxPartSize := blobs.BlobsMaxSize
+	blobs.BlobsMaxSize = 4
+	t.Cleanup(func() {
+		blobs.BlobsMaxSize = previousMaxPartSize
+	})
+
+	s := getStorage(t)
+	user, err := s.AddUser(context.Background(), "Update User")
+	if err != nil {
+		t.Fatalf("cannot add user: %v", err)
+	}
+
+	file, err := s.Upload(context.Background(), user.ID, "Notebook", "TXT", []byte("old-data"))
+	if err != nil {
+		t.Fatalf("cannot upload file: %v", err)
+	}
+
+	_, err = s.UpdateDataReader(context.Background(), file.ID, strings.NewReader("new"), len("new-data"))
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("got error %v, expected %v", err, io.ErrUnexpectedEOF)
+	}
+
+	got, err := readAll(t, s, file.ID)
+	if err != nil {
+		t.Fatalf("cannot read original file: %v", err)
+	}
+	if string(got) != "old-data" {
+		t.Fatalf("got %q, expected old content", got)
+	}
+}
+
+func TestReadUsesCanceledContext(t *testing.T) {
+	s := getStorage(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	dataCh, errCh := s.Read(ctx, FileID("does-not-matter"))
+	if chunk, ok := <-dataCh; ok {
+		t.Fatalf("got data chunk %q for canceled read", chunk)
+	}
+
+	err, ok := <-errCh
+	if !ok {
+		t.Fatal("error channel closed without reporting cancellation")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("got error %v, expected %v", err, context.Canceled)
+	}
+}
+
+func TestListFilesReturnsReadyFilesForOwner(t *testing.T) {
+	s := getStorage(t)
+	owner, err := s.AddUser(context.Background(), "Owner")
+	if err != nil {
+		t.Fatalf("cannot add owner: %v", err)
+	}
+	other, err := s.AddUser(context.Background(), "Other")
+	if err != nil {
+		t.Fatalf("cannot add other user: %v", err)
+	}
+
+	alpha, err := s.Upload(context.Background(), owner.ID, "alpha", "TXT", []byte("alpha"))
+	if err != nil {
+		t.Fatalf("cannot upload alpha: %v", err)
+	}
+	charlie, err := s.Upload(context.Background(), owner.ID, "charlie", "TXT", []byte("charlie"))
+	if err != nil {
+		t.Fatalf("cannot upload charlie: %v", err)
+	}
+	if _, err := s.PreUpload(context.Background(), owner.ID, "bravo", "TXT", 5); err != nil {
+		t.Fatalf("cannot create unfinished upload: %v", err)
+	}
+	if _, err := s.Upload(context.Background(), other.ID, "delta", "TXT", []byte("delta")); err != nil {
+		t.Fatalf("cannot upload other user file: %v", err)
+	}
+
+	files, err := s.ListFiles(context.Background(), owner.ID)
+	if err != nil {
+		t.Fatalf("cannot list files: %v", err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("got %d files, expected 2", len(files))
+	}
+	if files[0].ID != alpha.ID || files[1].ID != charlie.ID {
+		t.Fatalf("got files %v, expected alpha then charlie", files)
+	}
+}
+
+func TestFileBelongsToUser(t *testing.T) {
+	s := getStorage(t)
+	owner, err := s.AddUser(context.Background(), "Owner")
+	if err != nil {
+		t.Fatalf("cannot add owner: %v", err)
+	}
+	other, err := s.AddUser(context.Background(), "Other")
+	if err != nil {
+		t.Fatalf("cannot add other user: %v", err)
+	}
+
+	file, err := s.Upload(context.Background(), owner.ID, "Notebook", "TXT", []byte("data"))
+	if err != nil {
+		t.Fatalf("cannot upload file: %v", err)
+	}
+
+	belongs, err := s.FileBelongsToUser(context.Background(), file.ID, owner.ID)
+	if err != nil {
+		t.Fatalf("cannot check owner relationship: %v", err)
+	}
+	if !belongs {
+		t.Fatal("expected file to belong to owner")
+	}
+
+	belongs, err = s.FileBelongsToUser(context.Background(), file.ID, other.ID)
+	if err != nil {
+		t.Fatalf("cannot check other user relationship: %v", err)
+	}
+	if belongs {
+		t.Fatal("expected file not to belong to other user")
+	}
+
+	belongs, err = s.FileBelongsToUser(context.Background(), FileID("00000000-0000-0000-0000-000000000000"), owner.ID)
+	if err != nil {
+		t.Fatalf("cannot check missing file relationship: %v", err)
+	}
+	if belongs {
+		t.Fatal("expected missing file not to belong to owner")
+	}
+}
+
 func TestReadNotFound(t *testing.T) {
 	s := getStorage(t)
 
@@ -286,6 +457,14 @@ func TestUploadPartRejectsPositionOutsideDeclaredFileSize(t *testing.T) {
 	_, err = s.UploadPart(context.Background(), file.ID, 1, []byte("extra"))
 	if err == nil {
 		t.Fatal("expected error for upload part outside declared file size")
+	}
+
+	entries, err := os.ReadDir(s.bs.Path)
+	if err != nil {
+		t.Fatalf("cannot read blob storage directory: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("got %d blob files, expected none", len(entries))
 	}
 
 	loaded := s.loadFile(context.Background(), file.ID, FileStatusUploading)

@@ -1,14 +1,18 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
 	"gopherdisk/internal/blobs"
-	"sync"
+	"io"
+	"time"
 
 	"github.com/google/uuid"
 )
+
+var t time.Time
 
 var MaxPartSize = blobs.BlobsMaxSize
 var ErrEarlyFinishUpload = errors.New("Finishing uploading before each parst was upload")
@@ -31,6 +35,7 @@ type User struct {
 	Name string
 }
 
+// File, User in separated Go files
 type File struct {
 	ID       FileID
 	Name     string
@@ -71,12 +76,14 @@ func (s *Storage) AddUser(ctx context.Context, name string) (*User, error) {
 		Name: name,
 	}
 
+	// TODO: Incapsulate all db operations into Models
 	_, err := s.db.ExecContext(
 		ctx,
 		`INSERT INTO users (id, name) VALUES ($1, $2)`,
 		u.ID,
 		u.Name,
 	)
+
 	if err != nil {
 		return nil, err
 	}
@@ -107,33 +114,25 @@ func (s *Storage) Upload(
 	fileType FileKind,
 	data []byte,
 ) (*File, error) {
-	file, err := s.PreUpload(ctx, ownerId, name, fileType, len(data))
+	return s.UploadReader(ctx, ownerId, name, fileType, bytes.NewReader(data), len(data))
+}
+
+func (s *Storage) UploadReader(
+	ctx context.Context,
+	ownerId UserID,
+	name string,
+	fileType FileKind,
+	reader io.Reader,
+	size int,
+) (*File, error) {
+	file, err := s.PreUpload(ctx, ownerId, name, fileType, size)
 	if err != nil {
 		return nil, err
 	}
 
-	i := 0
-	var wg sync.WaitGroup
-	errCh := make(chan error, blobs.ComputeChunksAmount(len(data)))
-
-	for arr := range blobs.SplitDataOnChunks(data) {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			_, err := s.UploadPart(ctx, file.ID, i, arr)
-			errCh <- err
-		}(i)
-		i += 1
-	}
-
-	wg.Wait()
-	close(errCh)
-
-	for err := range errCh {
-		if err != nil {
-			_ = s.Delete(context.WithoutCancel(ctx), file.ID)
-			return nil, err
-		}
+	if err := s.uploadReaderParts(ctx, file.ID, reader, size); err != nil {
+		_ = s.Delete(context.WithoutCancel(ctx), file.ID)
+		return nil, err
 	}
 
 	if err := s.FinishUpload(ctx, file.ID); err != nil {
@@ -186,7 +185,7 @@ func (s *Storage) UploadPart(
 	fileId FileID,
 	partPosition int, data []byte,
 ) (blob *blobs.Blob, err error) {
-	if err := ctx.Err(); err != nil {
+	if err := s.validateUploadPart(ctx, fileId, partPosition); err != nil {
 		return nil, err
 	}
 
@@ -269,51 +268,45 @@ func (s *Storage) Rename(ctx context.Context, fileId FileID, newName string) (*F
 }
 
 func (s *Storage) UpdateData(ctx context.Context, fileId FileID, newData []byte) (*File, error) {
+	return s.UpdateDataReader(ctx, fileId, bytes.NewReader(newData), len(newData))
+}
+
+func (s *Storage) UpdateDataReader(ctx context.Context, fileId FileID, reader io.Reader, size int) (*File, error) {
 	file := s.GetFile(ctx, fileId)
 	if file == nil {
 		return nil, ErrStorageFileNotFound
 	}
 
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	newBlobs, err := s.bs.AddData(newData)
+	newBlobs, err := s.readAndStoreBlobs(ctx, reader, size)
 	if err != nil {
 		return nil, err
 	}
 
 	updatedFile := *file
 	updatedFile.Blobs = newBlobs
-	if err := s.replaceFileBlobs(ctx, &updatedFile, len(newData)); err != nil {
+	updatedFile.Size = size
+	if err := s.replaceFileBlobs(ctx, &updatedFile, size); err != nil {
 		return nil, err
 	}
 
 	file.Blobs = newBlobs
+	file.Size = size
 	return file, nil
 }
 
 func (s *Storage) Read(ctx context.Context, fileId FileID) (<-chan []byte, <-chan error) {
 	if err := ctx.Err(); err != nil {
-		dataCh := make(chan []byte)
-		errCh := make(chan error, 1)
-		close(dataCh)
-		errCh <- err
-		close(errCh)
-		return dataCh, errCh
+		return closedReadChannels(err)
 	}
 
-	file := s.GetFile(ctx, fileId)
-	if file == nil {
-		dataCh := make(chan []byte)
-		errCh := make(chan error, 1)
-		go func() {
-			close(dataCh)
-			errCh <- ErrStorageFileNotFound
-			close(errCh)
-		}()
-		return dataCh, errCh
+	file, err := s.loadFileResult(ctx, fileId, FileStatusReady)
+	if err != nil {
+		return closedReadChannels(err)
 	}
-	return s.bs.ReadBlobs(file.Blobs)
+	if file == nil {
+		return closedReadChannels(ErrStorageFileNotFound)
+	}
+	return s.bs.ReadBlobsContext(ctx, file.Blobs)
 }
 
 func (s *Storage) loadUser(ctx context.Context, userId UserID) *User {
@@ -329,6 +322,61 @@ func (s *Storage) loadUser(ctx context.Context, userId UserID) *User {
 	}
 
 	return &user
+}
+
+func (s *Storage) ListFiles(ctx context.Context, ownerId UserID) ([]File, error) {
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT id FROM files WHERE owner_id = $1 AND status = $2 ORDER BY name, id`,
+		ownerId,
+		FileStatusReady,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var fileIDs []FileID
+	for rows.Next() {
+		var fileID FileID
+		if err := rows.Scan(&fileID); err != nil {
+			return nil, err
+		}
+		fileIDs = append(fileIDs, fileID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	files := make([]File, 0, len(fileIDs))
+	for _, fileID := range fileIDs {
+		file, err := s.loadFileResult(ctx, fileID, FileStatusReady)
+		if err != nil {
+			return nil, err
+		}
+		if file != nil {
+			files = append(files, *file)
+		}
+	}
+
+	return files, nil
+}
+
+func (s *Storage) FileBelongsToUser(ctx context.Context, fileId FileID, ownerId UserID) (bool, error) {
+	row := s.db.QueryRowContext(
+		ctx,
+		`SELECT EXISTS (SELECT 1 FROM files WHERE id = $1 AND owner_id = $2 AND status = $3)`,
+		fileId,
+		ownerId,
+		FileStatusReady,
+	)
+
+	var exists bool
+	if err := row.Scan(&exists); err != nil {
+		return false, err
+	}
+
+	return exists, nil
 }
 
 func (s *Storage) CollectGarbageBlobs(ctx context.Context) (int, error) {
@@ -460,7 +508,11 @@ func (s *Storage) replaceFileBlobs(ctx context.Context, file *File, size int) er
 	return tx.Commit()
 }
 
-func (s *Storage) saveUploadedBlob(ctx context.Context, fileId FileID, position int, blob blobs.Blob) error {
+func (s *Storage) validateUploadPart(ctx context.Context, fileId FileID, position int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	file, err := s.loadFileResult(ctx, fileId, FileStatusUploading)
 	if err != nil {
 		return err
@@ -469,14 +521,73 @@ func (s *Storage) saveUploadedBlob(ctx context.Context, fileId FileID, position 
 		return ErrStorageFileNotFound
 	}
 
-	chunksAmount, err := s.loadFileChunksAmount(ctx, fileId)
-	if err != nil {
-		return err
-	}
+	chunksAmount := blobs.ComputeChunksAmount(file.Size)
 	if position < 0 || position >= chunksAmount {
 		return ErrIndexOutOfBounds
 	}
 
+	return nil
+}
+
+func (s *Storage) uploadReaderParts(ctx context.Context, fileId FileID, reader io.Reader, size int) error {
+	position := 0
+	return s.readChunks(ctx, reader, size, func(chunk []byte) error {
+		_, err := s.UploadPart(ctx, fileId, position, chunk)
+		position++
+		return err
+	})
+}
+
+func (s *Storage) readAndStoreBlobs(ctx context.Context, reader io.Reader, size int) ([]blobs.Blob, error) {
+	stored := make([]blobs.Blob, 0, blobs.ComputeChunksAmount(size))
+	err := s.readChunks(ctx, reader, size, func(chunk []byte) error {
+		blob, err := s.bs.AddOneChunk(chunk)
+		if err != nil {
+			return err
+		}
+		stored = append(stored, *blob)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return stored, nil
+}
+
+func (s *Storage) readChunks(ctx context.Context, reader io.Reader, size int, handle func([]byte) error) error {
+	remaining := size
+	for remaining > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		chunkSize := min(remaining, blobs.BlobsMaxSize)
+		chunk := make([]byte, chunkSize)
+		if _, err := io.ReadFull(reader, chunk); err != nil {
+			return err
+		}
+		if err := handle(chunk); err != nil {
+			return err
+		}
+
+		remaining -= chunkSize
+	}
+
+	return ctx.Err()
+}
+
+func closedReadChannels(err error) (<-chan []byte, <-chan error) {
+	dataCh := make(chan []byte)
+	errCh := make(chan error, 1)
+	close(dataCh)
+	if err != nil {
+		errCh <- err
+	}
+	close(errCh)
+	return dataCh, errCh
+}
+
+func (s *Storage) saveUploadedBlob(ctx context.Context, fileId FileID, position int, blob blobs.Blob) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err

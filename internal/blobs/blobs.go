@@ -5,6 +5,7 @@ package blobs
 // every blob is a real file in file system that responds on struct File that visible for user
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -102,25 +103,39 @@ func (bs *BlobStorage) DeleteBlob(blob Blob) error {
 }
 
 func (bs *BlobStorage) ReadBlobs(blobs []Blob) (<-chan []byte, <-chan error) {
-	data := make(chan []byte)
+	return bs.ReadBlobsContext(context.Background(), blobs)
+}
 
-	err := make(chan error)
+func (bs *BlobStorage) ReadBlobsContext(ctx context.Context, blobs []Blob) (<-chan []byte, <-chan error) {
+	data := make(chan []byte)
+	errCh := make(chan error, 1)
 
 	go func() {
-		defer close(err)
+		defer close(data)
+		defer close(errCh)
+
 		for _, bl := range blobs {
-			d, e := bs.ReadBlob(bl)
-			if e != nil {
-				close(data)
-				err <- e
+			if err := ctx.Err(); err != nil {
+				errCh <- err
 				return
 			}
-			data <- d
+
+			d, err := bs.ReadBlob(bl)
+			if err != nil {
+				errCh <- err
+				return
+			}
+
+			select {
+			case data <- d:
+			case <-ctx.Done():
+				errCh <- ctx.Err()
+				return
+			}
 		}
-		close(data)
 	}()
 
-	return data, err
+	return data, errCh
 }
 
 func (bs *BlobStorage) ReadBlob(blob Blob) ([]byte, error) {
