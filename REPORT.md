@@ -8,7 +8,7 @@ GopherDisk is **not yet ready to serve as a dependable web-server backend**.
 The architecture is promising, but the storage layer should go through one
 hardening milestone before HTTP handlers are built directly on top of it.
 
-The project is ready to continue *toward* a web server, including preliminary
+The project is ready to continue _toward_ a web server, including preliminary
 server scaffolding, but its current storage API should not yet be treated as a
 stable or production-safe boundary.
 
@@ -33,7 +33,7 @@ were not actually verified during this assessment. The test setup currently
 skips these tests in `internal/storage/storage_test.go` when the environment
 variables are missing.
 
-### 2. Read APIs hide database failures as missing resources
+### 2. TODO: Read APIs hide database failures as missing resources
 
 `GetFile` and `GetUser` return only pointers. Their internal loading helpers
 discard database and context errors and return `nil`.
@@ -61,7 +61,7 @@ The upload state transition should be protected transactionally, likely by
 locking the logical file row while attaching parts and while finalizing it.
 Tests should exercise concurrent `UploadPart` and `FinishUpload` calls.
 
-### 4. Filesystem and database consistency is not crash-safe
+### 4. TODO: Filesystem and database consistency is not crash-safe
 
 Blob data is written directly to its final hash path before its metadata is
 committed to PostgreSQL.
@@ -81,7 +81,7 @@ project also needs a clear staging or filesystem-reconciliation strategy for
 untracked physical blobs. Garbage collection and upload association must not be
 able to delete or lose a blob that is becoming referenced.
 
-### 5. Upload size validation is incomplete
+### 5. TODO: Upload size validation is incomplete
 
 Current issues include:
 
@@ -146,13 +146,13 @@ The project already has a strong foundation:
 5. Add concurrency and failure-injection tests for upload finalization, updates,
    cleanup, and garbage collection.
 6. Add a thin HTTP server with:
-   - streamed request bodies and downloads;
-   - request and file-size limits;
-   - consistent domain-error-to-HTTP-status mapping;
-   - owner-scoped file operations;
-   - list pagination;
-   - server timeouts and graceful shutdown;
-   - health and readiness checks.
+    - streamed request bodies and downloads;
+    - request and file-size limits;
+    - consistent domain-error-to-HTTP-status mapping;
+    - owner-scoped file operations;
+    - list pagination;
+    - server timeouts and graceful shutdown;
+    - health and readiness checks.
 
 ## Final assessment
 
