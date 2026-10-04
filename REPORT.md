@@ -33,7 +33,7 @@ were not actually verified during this assessment. The test setup currently
 skips these tests in `internal/storage/storage_test.go` when the environment
 variables are missing.
 
-### 2. TODO: Read APIs hide database failures as missing resources
+### 2. Read APIs hide database failures as missing resources
 
 `GetFile` and `GetUser` return only pointers. Their internal loading helpers
 discard database and context errors and return `nil`.
@@ -61,7 +61,7 @@ The upload state transition should be protected transactionally, likely by
 locking the logical file row while attaching parts and while finalizing it.
 Tests should exercise concurrent `UploadPart` and `FinishUpload` calls.
 
-### 4. TODO: Filesystem and database consistency is not crash-safe
+### 4. Filesystem and database consistency is not crash-safe
 
 Blob data is written directly to its final hash path before its metadata is
 committed to PostgreSQL.

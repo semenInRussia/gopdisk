@@ -102,6 +102,33 @@ func (bs *BlobStorage) DeleteBlob(blob Blob) error {
 	return bs.deleteFile(blob.Hash)
 }
 
+func (bs *BlobStorage) ListBlobs() ([]Blob, error) {
+	entries, err := os.ReadDir(bs.Path)
+	if err != nil {
+		return nil, err
+	}
+
+	blobs := make([]Blob, 0, len(entries))
+
+	for _, entry := range entries {
+		if !entry.Type().IsRegular() {
+			continue
+		}
+
+		info, err := entry.Info()
+		if err != nil {
+			return nil, err
+		}
+
+		blobs = append(blobs, Blob{
+			Hash: entry.Name(),
+			Size: int(info.Size()),
+		})
+	}
+
+	return blobs, nil
+}
+
 func (bs *BlobStorage) ReadBlobs(blobs []Blob) (<-chan []byte, <-chan error) {
 	return bs.ReadBlobsContext(context.Background(), blobs)
 }

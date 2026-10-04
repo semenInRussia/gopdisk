@@ -9,6 +9,7 @@ import (
 	"gopherdisk/internal/database"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -535,6 +536,32 @@ func TestCollectGarbageBlobsDeletesUnreferencedBlob(t *testing.T) {
 	}
 	if blobFileExists(t, s, *blob) {
 		t.Fatalf("blob file %q still exists", blob.Hash)
+	}
+}
+
+func TestCollectGarbageDeletesBlobsOutsideDb(t *testing.T) {
+	s := getGarbageCollectionStorage(t)
+
+	hash := "hash"
+	content := []byte("sample text")
+
+	err := os.WriteFile(path.Join(s.bs.Path, hash), content, 0644)
+	if err != nil {
+		t.Fatalf("cannot create a blob manually")
+	}
+
+	deleted, err := s.CollectGarbageBlobs(context.Background())
+	if err != nil {
+		t.Fatalf("cannot collect garbage blobs: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("got %d deleted blobs, expected 1", deleted)
+	}
+
+	blob := blobs.Blob{Hash: hash, Size: len(content)}
+
+	if blobFileExists(t, s, blob) {
+		t.Fatalf("orphaned blob file %q still exists", blob.Hash)
 	}
 }
 
