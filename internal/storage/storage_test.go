@@ -120,6 +120,32 @@ func TestAddUserUsesCanceledContext(t *testing.T) {
 	}
 }
 
+func TestDeleteUser(t *testing.T) {
+	s := getStorage(t)
+
+	user, err := s.AddUser(context.Background(), "Delete Me")
+	if err != nil {
+		t.Fatalf("cannot add user: %v", err)
+	}
+
+	if err := s.DeleteUser(context.Background(), user.ID); err != nil {
+		t.Fatalf("cannot delete user: %v", err)
+	}
+
+	if got := s.GetUser(context.Background(), user.ID); got != nil {
+		t.Fatalf("got deleted user %+v, expected nil", got)
+	}
+}
+
+func TestDeleteUserReturnsNotFound(t *testing.T) {
+	s := getStorage(t)
+
+	err := s.DeleteUser(context.Background(), GenerateUserID())
+	if !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("got error %v, expected %v", err, ErrUserNotFound)
+	}
+}
+
 func TestUploadAndRead(t *testing.T) {
 	s := getStorage(t)
 
