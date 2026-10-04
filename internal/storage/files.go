@@ -34,8 +34,8 @@ func GenerateFileID() FileID {
 	return FileID(uuid.New().String())
 }
 
-func (s *Storage) GetFile(ctx context.Context, fileId FileID) *File {
-	return s.loadFile(ctx, fileId, FileStatusReady)
+func (s *Storage) GetFile(ctx context.Context, fileId FileID) (*File, error) {
+	return s.loadFileResult(ctx, fileId, FileStatusReady)
 }
 
 func (s *Storage) Upload(
@@ -71,7 +71,7 @@ func (s *Storage) UploadReader(
 		return nil, err
 	}
 
-	return s.GetFile(ctx, file.ID), nil
+	return s.GetFile(ctx, file.ID)
 }
 
 func (s *Storage) PreUpload(
@@ -178,12 +178,15 @@ func (s *Storage) Delete(ctx context.Context, fileId FileID) error {
 }
 
 func (s *Storage) Rename(ctx context.Context, fileId FileID, newName string) (*File, error) {
-	file := s.GetFile(ctx, fileId)
+	file, err := s.GetFile(ctx, fileId)
+	if err != nil {
+		return nil, err
+	}
 	if file == nil {
 		return nil, ErrStorageFileNotFound
 	}
 
-	_, err := s.db.ExecContext(
+	_, err = s.db.ExecContext(
 		ctx,
 		`UPDATE files SET name = $1 WHERE id = $2 AND status = $3`,
 		newName,
@@ -203,7 +206,10 @@ func (s *Storage) UpdateData(ctx context.Context, fileId FileID, newData []byte)
 }
 
 func (s *Storage) UpdateDataReader(ctx context.Context, fileId FileID, reader io.Reader, size int) (*File, error) {
-	file := s.GetFile(ctx, fileId)
+	file, err := s.GetFile(ctx, fileId)
+	if err != nil {
+		return nil, err
+	}
 	if file == nil {
 		return nil, ErrStorageFileNotFound
 	}
@@ -276,14 +282,6 @@ func (s *Storage) ListFiles(ctx context.Context, ownerId UserID) ([]File, error)
 	}
 
 	return files, nil
-}
-
-func (s *Storage) loadFile(ctx context.Context, fileId FileID, status FileStatus) *File {
-	file, err := s.loadFileResult(ctx, fileId, status)
-	if err != nil {
-		return nil
-	}
-	return file
 }
 
 func (s *Storage) loadFileResult(ctx context.Context, fileId FileID, status FileStatus) (*File, error) {

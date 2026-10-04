@@ -51,7 +51,10 @@ func TestPostgresStoragePersistsAndLoadsFile(t *testing.T) {
 		t.Fatalf("cannot create second postgres storage: %v", err)
 	}
 
-	loadedFile := loadedStorage.GetFile(context.Background(), file.ID)
+	loadedFile, err := loadedStorage.GetFile(context.Background(), file.ID)
+	if err != nil {
+		t.Fatalf("got error from GetFile %v", err)
+	}
 	if loadedFile == nil {
 		t.Fatal("GetFile returned nil")
 	}
@@ -82,7 +85,10 @@ func TestPostgresStoragePersistsAndLoadsFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot create storage after rename: %v", err)
 	}
-	afterRename := afterRenameStorage.GetFile(context.Background(), file.ID)
+	afterRename, err := afterRenameStorage.GetFile(context.Background(), file.ID)
+	if err != nil {
+		t.Fatalf("cannot GetFile after rename: %v", err)
+	}
 	if afterRename == nil {
 		t.Fatal("GetFile after rename returned nil")
 	}
@@ -121,7 +127,11 @@ func TestPostgresStoragePersistsAndLoadsFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot create storage after delete: %v", err)
 	}
-	if gotFile := afterDeleteStorage.GetFile(context.Background(), file.ID); gotFile != nil {
+	gotFile, err := afterDeleteStorage.GetFile(context.Background(), file.ID)
+	if err != nil {
+		t.Fatalf("GetFile after delete returned err: %v", err)
+	}
+	if gotFile != nil {
 		t.Fatalf("GetFile after delete returned file %q", gotFile.ID)
 	}
 }

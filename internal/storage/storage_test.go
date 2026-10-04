@@ -493,7 +493,10 @@ func TestUploadPartRejectsPositionOutsideDeclaredFileSize(t *testing.T) {
 		t.Fatalf("got %d blob files, expected none", len(entries))
 	}
 
-	loaded := s.loadFile(context.Background(), file.ID, FileStatusUploading)
+	loaded, err := s.loadFileResult(context.Background(), file.ID, FileStatusUploading)
+	if err != nil {
+		t.Fatalf("cannot load uploading file: %v", err)
+	}
 	if loaded == nil {
 		t.Fatal("cannot load uploading file")
 	}
@@ -731,8 +734,11 @@ func TestRename(t *testing.T) {
 		)
 	}
 
-	file2 := s.GetFile(context.Background(), file.ID)
+	file2, err := s.GetFile(context.Background(), file.ID)
 
+	if err != nil {
+		t.Fatalf("GetFile returned error: %v", err)
+	}
 	if file2 == nil {
 		t.Fatal("GetFile returned nil")
 	}
