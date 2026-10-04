@@ -292,6 +292,38 @@ func TestPreUploadPartsFinishAndRead(t *testing.T) {
 	}
 }
 
+func TestUploadPartRejectsInvalidFinalPartSize(t *testing.T) {
+	previousMaxPartSize := blobs.BlobsMaxSize
+	previousStorageMaxPartSize := MaxPartSize
+	blobs.BlobsMaxSize = 4
+	MaxPartSize = 4
+	t.Cleanup(func() {
+		blobs.BlobsMaxSize = previousMaxPartSize
+		MaxPartSize = previousStorageMaxPartSize
+	})
+
+	s := getStorage(t)
+
+	kotik, err := s.AddUser(context.Background(), "Kotik")
+	if err != nil {
+		t.Fatalf("cannot add user Kotik: %v", err)
+	}
+
+	file, err := s.PreUploadFile(context.Background(), kotik.ID, "Notebook", "TXT", len("hello"))
+	if err != nil {
+		t.Fatalf("cannot create pre-upload file: %v", err)
+	}
+
+	if _, err := s.UploadFilePart(context.Background(), file.ID, 0, []byte("hell")); err != nil {
+		t.Fatalf("cannot upload first part: %v", err)
+	}
+
+	_, err = s.UploadFilePart(context.Background(), file.ID, 1, []byte("oops"))
+	if !errors.Is(err, ErrInvalidPartSize) {
+		t.Fatalf("got error %v, expected %v", err, ErrInvalidPartSize)
+	}
+}
+
 func TestUploadReaderAndRead(t *testing.T) {
 	previousMaxPartSize := blobs.BlobsMaxSize
 	blobs.BlobsMaxSize = 4

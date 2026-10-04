@@ -124,7 +124,7 @@ func (s *Storage) UploadFilePart(
 	fileId FileID,
 	partPosition int, data []byte,
 ) (blob *blobs.Blob, err error) {
-	if err := s.validateUploadPart(ctx, fileId, partPosition); err != nil {
+	if err := s.validateUploadPart(ctx, fileId, partPosition, len(data)); err != nil {
 		return nil, err
 	}
 
@@ -372,7 +372,12 @@ func (s *Storage) replaceFileBlobs(ctx context.Context, file *File, size int) er
 	return tx.Commit()
 }
 
-func (s *Storage) validateUploadPart(ctx context.Context, fileId FileID, position int) error {
+func (s *Storage) validateUploadPart(
+	ctx context.Context,
+	fileId FileID,
+	position int,
+	size int,
+) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -388,6 +393,10 @@ func (s *Storage) validateUploadPart(ctx context.Context, fileId FileID, positio
 	chunksAmount := blobs.ComputeChunksAmount(file.Size)
 	if position < 0 || position >= chunksAmount {
 		return ErrIndexOutOfBounds
+	}
+
+	if (position < chunksAmount-1 && size != MaxPartSize) || file.Size%MaxPartSize != size {
+		return ErrInvalidPartSize
 	}
 
 	return nil
