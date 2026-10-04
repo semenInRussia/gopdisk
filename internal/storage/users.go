@@ -2,6 +2,8 @@ package storage
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 
 	"github.com/google/uuid"
 )
@@ -38,7 +40,7 @@ func (s *Storage) AddUser(ctx context.Context, name string) (*User, error) {
 	return &u, nil
 }
 
-func (s *Storage) GetUser(ctx context.Context, userId UserID) *User {
+func (s *Storage) GetUser(ctx context.Context, userId UserID) (*User, error) {
 	return s.loadUser(ctx, userId)
 }
 
@@ -62,7 +64,7 @@ func (s *Storage) DeleteUser(ctx context.Context, user UserID) error {
 	return nil
 }
 
-func (s *Storage) loadUser(ctx context.Context, userId UserID) *User {
+func (s *Storage) loadUser(ctx context.Context, userId UserID) (*User, error) {
 	row := s.db.QueryRowContext(
 		ctx,
 		`SELECT id, name FROM users WHERE id = $1`,
@@ -70,9 +72,14 @@ func (s *Storage) loadUser(ctx context.Context, userId UserID) *User {
 	)
 
 	var user User
-	if err := row.Scan(&user.ID, &user.Name); err != nil {
-		return nil
+	err := row.Scan(&user.ID, &user.Name)
+
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
 	}
 
-	return &user
+	return &user, nil
 }

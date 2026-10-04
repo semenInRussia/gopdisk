@@ -100,10 +100,13 @@ func TestAddUser(t *testing.T) {
 		)
 	}
 
-	got := s.GetUser(context.Background(), u.ID)
+	got, err := s.GetUser(context.Background(), u.ID)
 
 	if got == nil {
 		t.Fatal("GetUser returned nil")
+	}
+	if err != nil {
+		t.Fatalf("GetUser returned error: %v", err)
 	}
 
 	if got.ID != u.ID {
@@ -193,7 +196,11 @@ func TestDeleteUser(t *testing.T) {
 		t.Fatalf("cannot delete user: %v", err)
 	}
 
-	if got := s.GetUser(context.Background(), user.ID); got != nil {
+	got, err := s.GetUser(context.Background(), user.ID)
+	if err != nil {
+		t.Fatalf("cannot get exist user: %v", err)
+	}
+	if got != nil {
 		t.Fatalf("got deleted user %+v, expected nil", got)
 	}
 }
