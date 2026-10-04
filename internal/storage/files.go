@@ -5,10 +5,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"gopherdisk/internal/blobs"
 	"io"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type FileID string
@@ -18,6 +20,12 @@ type FileKind string
 const (
 	FileStatusUploading FileStatus = "uploading"
 	FileStatusReady     FileStatus = "ready"
+)
+
+const (
+	checkViolationCode             = "23514"
+	filesSizeNonNegativeConstraint = "files_size_non_negative"
+	blobsSizeNonNegativeConstraint = "blobs_size_non_negative"
 )
 
 type File struct {
@@ -105,7 +113,7 @@ func (s *Storage) PreUpload(
 		file.Status,
 	)
 	if err != nil {
-		return nil, err
+		return nil, handleStorageDatabaseError(err)
 	}
 
 	return &file, nil
@@ -345,7 +353,7 @@ func (s *Storage) replaceFileBlobs(ctx context.Context, file *File, size int) er
 		file.ID,
 	)
 	if err != nil {
-		return err
+		return handleStorageDatabaseError(err)
 	}
 
 	_, err = tx.ExecContext(
@@ -395,6 +403,9 @@ func (s *Storage) uploadReaderParts(ctx context.Context, fileId FileID, reader i
 }
 
 func (s *Storage) readAndStoreBlobs(ctx context.Context, reader io.Reader, size int) ([]blobs.Blob, error) {
+	if size < 0 {
+		return nil, ErrStorageInvalidSize
+	}
 	stored := make([]blobs.Blob, 0, blobs.ComputeChunksAmount(size))
 	err := s.readChunks(ctx, reader, size, func(chunk []byte) error {
 		blob, err := s.bs.AddOneChunk(chunk)
@@ -530,5 +541,21 @@ func saveBlob(ctx context.Context, tx *sql.Tx, blob blobs.Blob) error {
 		blob.Hash,
 		blob.Size,
 	)
+	return handleStorageDatabaseError(err)
+}
+
+func handleStorageDatabaseError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) &&
+		pgErr.Code == checkViolationCode &&
+		(pgErr.ConstraintName == filesSizeNonNegativeConstraint ||
+			pgErr.ConstraintName == blobsSizeNonNegativeConstraint) {
+		return fmt.Errorf("%w: %v", ErrStorageInvalidSize, err)
+	}
+
 	return err
 }

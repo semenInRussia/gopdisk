@@ -9,12 +9,14 @@ CREATE TABLE files (
     name TEXT NOT NULL,
     owner_id UUID NOT NULL REFERENCES users(id),
     filetype TEXT NOT NULL,
-    size BIGINT NOT NULL DEFAULT 0
+    size BIGINT NOT NULL DEFAULT 0,
+    CONSTRAINT files_size_non_negative CHECK (size >= 0)
 );
 
 CREATE TABLE blobs (
     hash TEXT PRIMARY KEY,
-    size BIGINT NOT NULL
+    size BIGINT NOT NULL,
+    CONSTRAINT blobs_size_non_negative CHECK (size >= 0)
 );
 
 CREATE TABLE file_blobs (

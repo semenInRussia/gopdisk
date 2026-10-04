@@ -7,5 +7,6 @@ var (
 	ErrIndexOutOfBounds        = errors.New("Index out of bounds")
 	ErrStorageDatabaseRequired = errors.New("Database connection is required")
 	ErrStorageFileNotFound     = errors.New("Could not find a file in storage")
+	ErrStorageInvalidSize      = errors.New("storage size must be non-negative")
 	ErrUserNotFound            = errors.New("Could not find an user")
 )

@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 const (
@@ -118,6 +120,64 @@ func TestAddUserUsesCanceledContext(t *testing.T) {
 	_, err := s.AddUser(ctx, "Kotik")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("got error %v, expected %v", err, context.Canceled)
+	}
+}
+
+func TestPreUploadRejectsNegativeSize(t *testing.T) {
+	s := getStorage(t)
+
+	kotik, err := s.AddUser(context.Background(), "Kotik")
+	if err != nil {
+		t.Fatalf("cannot add user Kotik: %v", err)
+	}
+
+	_, err = s.PreUpload(context.Background(), kotik.ID, "Notebook", "TXT", -1)
+	if !errors.Is(err, ErrStorageInvalidSize) {
+		t.Fatalf("got error %v, expected %v", err, ErrStorageInvalidSize)
+	}
+}
+
+func TestUploadReaderRejectsNegativeSize(t *testing.T) {
+	s := getStorage(t)
+
+	kotik, err := s.AddUser(context.Background(), "Kotik")
+	if err != nil {
+		t.Fatalf("cannot add user Kotik: %v", err)
+	}
+
+	_, err = s.UploadReader(context.Background(), kotik.ID, "Notebook", "TXT", strings.NewReader(""), -1)
+	if !errors.Is(err, ErrStorageInvalidSize) {
+		t.Fatalf("got error %v, expected %v", err, ErrStorageInvalidSize)
+	}
+}
+
+func TestUpdateDataReaderRejectsNegativeSize(t *testing.T) {
+	s := getStorage(t)
+
+	kotik, err := s.AddUser(context.Background(), "Kotik")
+	if err != nil {
+		t.Fatalf("cannot add user Kotik: %v", err)
+	}
+
+	file, err := s.Upload(context.Background(), kotik.ID, "Notebook", "TXT", []byte("Hi man!"))
+	if err != nil {
+		t.Fatalf("cannot upload Notebook: %v", err)
+	}
+
+	_, err = s.UpdateDataReader(context.Background(), file.ID, strings.NewReader(""), -1)
+	if !errors.Is(err, ErrStorageInvalidSize) {
+		t.Fatalf("got error %v, expected %v", err, ErrStorageInvalidSize)
+	}
+}
+
+func TestHandleStorageDatabaseErrorMapsSizeCheckViolation(t *testing.T) {
+	err := handleStorageDatabaseError(&pgconn.PgError{
+		Code:           checkViolationCode,
+		ConstraintName: filesSizeNonNegativeConstraint,
+	})
+
+	if !errors.Is(err, ErrStorageInvalidSize) {
+		t.Fatalf("got error %v, expected %v", err, ErrStorageInvalidSize)
 	}
 }
 
