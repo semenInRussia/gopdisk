@@ -35,7 +35,7 @@ func TestPostgresStoragePersistsAndLoadsFile(t *testing.T) {
 	})
 
 	data := []byte("postgres backed file")
-	file, err := s.Upload(context.Background(), user.ID, "db-file", "TXT", data)
+	file, err := s.UploadFile(context.Background(), user.ID, "db-file", "TXT", data)
 	if err != nil {
 		t.Fatalf("cannot upload file: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestPostgresStoragePersistsAndLoadsFile(t *testing.T) {
 		t.Fatalf("got data %q, expected %q", got, data)
 	}
 
-	renamed, err := loadedStorage.Rename(context.Background(), file.ID, "renamed-db-file")
+	renamed, err := loadedStorage.RenameFile(context.Background(), file.ID, "renamed-db-file")
 	if err != nil {
 		t.Fatalf("cannot rename file: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestPostgresStoragePersistsAndLoadsFile(t *testing.T) {
 	}
 
 	updatedData := []byte("updated postgres backed file")
-	updated, err := afterRenameStorage.UpdateData(context.Background(), file.ID, updatedData)
+	updated, err := afterRenameStorage.UpdateFileData(context.Background(), file.ID, updatedData)
 	if err != nil {
 		t.Fatalf("cannot update file data: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestPostgresStoragePersistsAndLoadsFile(t *testing.T) {
 		t.Fatalf("got updated data %q, expected %q", got, updatedData)
 	}
 
-	if err := afterUpdateStorage.Delete(context.Background(), file.ID); err != nil {
+	if err := afterUpdateStorage.DeleteFile(context.Background(), file.ID); err != nil {
 		t.Fatalf("cannot delete file: %v", err)
 	}
 

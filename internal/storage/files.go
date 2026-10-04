@@ -46,17 +46,17 @@ func (s *Storage) GetFile(ctx context.Context, fileId FileID) (*File, error) {
 	return s.loadFileResult(ctx, fileId, FileStatusReady)
 }
 
-func (s *Storage) Upload(
+func (s *Storage) UploadFile(
 	ctx context.Context,
 	ownerId UserID,
 	name string,
 	fileType FileKind,
 	data []byte,
 ) (*File, error) {
-	return s.UploadReader(ctx, ownerId, name, fileType, bytes.NewReader(data), len(data))
+	return s.UploadFileReader(ctx, ownerId, name, fileType, bytes.NewReader(data), len(data))
 }
 
-func (s *Storage) UploadReader(
+func (s *Storage) UploadFileReader(
 	ctx context.Context,
 	ownerId UserID,
 	name string,
@@ -64,25 +64,25 @@ func (s *Storage) UploadReader(
 	reader io.Reader,
 	size int,
 ) (*File, error) {
-	file, err := s.PreUpload(ctx, ownerId, name, fileType, size)
+	file, err := s.PreUploadFile(ctx, ownerId, name, fileType, size)
 	if err != nil {
 		return nil, err
 	}
 
 	if err := s.uploadReaderParts(ctx, file.ID, reader, size); err != nil {
-		_ = s.Delete(context.WithoutCancel(ctx), file.ID)
+		_ = s.DeleteFile(context.WithoutCancel(ctx), file.ID)
 		return nil, err
 	}
 
-	if err := s.FinishUpload(ctx, file.ID); err != nil {
-		_ = s.Delete(context.WithoutCancel(ctx), file.ID)
+	if err := s.FinishUploadFile(ctx, file.ID); err != nil {
+		_ = s.DeleteFile(context.WithoutCancel(ctx), file.ID)
 		return nil, err
 	}
 
 	return s.GetFile(ctx, file.ID)
 }
 
-func (s *Storage) PreUpload(
+func (s *Storage) PreUploadFile(
 	ctx context.Context,
 	ownerId UserID,
 	name string,
@@ -119,7 +119,7 @@ func (s *Storage) PreUpload(
 	return &file, nil
 }
 
-func (s *Storage) UploadPart(
+func (s *Storage) UploadFilePart(
 	ctx context.Context,
 	fileId FileID,
 	partPosition int, data []byte,
@@ -138,7 +138,7 @@ func (s *Storage) UploadPart(
 	return
 }
 
-func (s *Storage) FinishUpload(ctx context.Context, fileId FileID) error {
+func (s *Storage) FinishUploadFile(ctx context.Context, fileId FileID) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -163,7 +163,7 @@ func (s *Storage) FinishUpload(ctx context.Context, fileId FileID) error {
 	return s.markFileReady(ctx, fileId)
 }
 
-func (s *Storage) Delete(ctx context.Context, fileId FileID) error {
+func (s *Storage) DeleteFile(ctx context.Context, fileId FileID) error {
 	file, err := s.loadFileResult(ctx, fileId, "")
 	if err != nil {
 		return err
@@ -185,7 +185,7 @@ func (s *Storage) Delete(ctx context.Context, fileId FileID) error {
 	return nil
 }
 
-func (s *Storage) Rename(ctx context.Context, fileId FileID, newName string) (*File, error) {
+func (s *Storage) RenameFile(ctx context.Context, fileId FileID, newName string) (*File, error) {
 	file, err := s.GetFile(ctx, fileId)
 	if err != nil {
 		return nil, err
@@ -209,7 +209,7 @@ func (s *Storage) Rename(ctx context.Context, fileId FileID, newName string) (*F
 	return file, nil
 }
 
-func (s *Storage) UpdateData(ctx context.Context, fileId FileID, newData []byte) (*File, error) {
+func (s *Storage) UpdateFileData(ctx context.Context, fileId FileID, newData []byte) (*File, error) {
 	return s.UpdateDataReader(ctx, fileId, bytes.NewReader(newData), len(newData))
 }
 
@@ -239,7 +239,7 @@ func (s *Storage) UpdateDataReader(ctx context.Context, fileId FileID, reader io
 	return file, nil
 }
 
-func (s *Storage) Read(ctx context.Context, fileId FileID) (<-chan []byte, <-chan error) {
+func (s *Storage) ReadFile(ctx context.Context, fileId FileID) (<-chan []byte, <-chan error) {
 	if err := ctx.Err(); err != nil {
 		return closedReadChannels(err)
 	}
@@ -396,7 +396,7 @@ func (s *Storage) validateUploadPart(ctx context.Context, fileId FileID, positio
 func (s *Storage) uploadReaderParts(ctx context.Context, fileId FileID, reader io.Reader, size int) error {
 	position := 0
 	return s.readChunks(ctx, reader, size, func(chunk []byte) error {
-		_, err := s.UploadPart(ctx, fileId, position, chunk)
+		_, err := s.UploadFilePart(ctx, fileId, position, chunk)
 		position++
 		return err
 	})

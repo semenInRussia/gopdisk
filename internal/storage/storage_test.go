@@ -59,7 +59,7 @@ func getDatabase(t *testing.T) *sql.DB {
 func readAll(t *testing.T, s *Storage, fileID FileID) ([]byte, error) {
 	t.Helper()
 
-	dataCh, errCh := s.Read(context.Background(), fileID)
+	dataCh, errCh := s.ReadFile(context.Background(), fileID)
 
 	var data []byte
 
@@ -134,7 +134,7 @@ func TestPreUploadRejectsNegativeSize(t *testing.T) {
 		t.Fatalf("cannot add user Kotik: %v", err)
 	}
 
-	_, err = s.PreUpload(context.Background(), kotik.ID, "Notebook", "TXT", -1)
+	_, err = s.PreUploadFile(context.Background(), kotik.ID, "Notebook", "TXT", -1)
 	if !errors.Is(err, ErrStorageInvalidSize) {
 		t.Fatalf("got error %v, expected %v", err, ErrStorageInvalidSize)
 	}
@@ -148,7 +148,7 @@ func TestUploadReaderRejectsNegativeSize(t *testing.T) {
 		t.Fatalf("cannot add user Kotik: %v", err)
 	}
 
-	_, err = s.UploadReader(context.Background(), kotik.ID, "Notebook", "TXT", strings.NewReader(""), -1)
+	_, err = s.UploadFileReader(context.Background(), kotik.ID, "Notebook", "TXT", strings.NewReader(""), -1)
 	if !errors.Is(err, ErrStorageInvalidSize) {
 		t.Fatalf("got error %v, expected %v", err, ErrStorageInvalidSize)
 	}
@@ -162,7 +162,7 @@ func TestUpdateDataReaderRejectsNegativeSize(t *testing.T) {
 		t.Fatalf("cannot add user Kotik: %v", err)
 	}
 
-	file, err := s.Upload(context.Background(), kotik.ID, "Notebook", "TXT", []byte("Hi man!"))
+	file, err := s.UploadFile(context.Background(), kotik.ID, "Notebook", "TXT", []byte("Hi man!"))
 	if err != nil {
 		t.Fatalf("cannot upload Notebook: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestUploadAndRead(t *testing.T) {
 
 	notebookText := []byte("Hi man!")
 
-	file, err := s.Upload(context.Background(),
+	file, err := s.UploadFile(context.Background(),
 		kotik.ID,
 		"Notebook",
 		"TXT",
@@ -262,7 +262,7 @@ func TestPreUploadPartsFinishAndRead(t *testing.T) {
 		t.Fatalf("cannot add user Kotik: %v", err)
 	}
 
-	file, err := s.PreUpload(context.Background(), kotik.ID, "Notebook", "TXT", len("hello-world"))
+	file, err := s.PreUploadFile(context.Background(), kotik.ID, "Notebook", "TXT", len("hello-world"))
 	if err != nil {
 		t.Fatalf("cannot create pre-upload file: %v", err)
 	}
@@ -273,12 +273,12 @@ func TestPreUploadPartsFinishAndRead(t *testing.T) {
 		[]byte("rld"),
 	}
 	for i, part := range parts {
-		if _, err := s.UploadPart(context.Background(), file.ID, i, part); err != nil {
+		if _, err := s.UploadFilePart(context.Background(), file.ID, i, part); err != nil {
 			t.Fatalf("cannot upload part %d: %v", i, err)
 		}
 	}
 
-	if err := s.FinishUpload(context.Background(), file.ID); err != nil {
+	if err := s.FinishUploadFile(context.Background(), file.ID); err != nil {
 		t.Fatalf("cannot finish upload: %v", err)
 	}
 
@@ -315,7 +315,7 @@ func TestUploadReaderAndRead(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		file, err := s.UploadReader(context.Background(), user.ID, tc.name, "TXT", strings.NewReader(tc.data), len(tc.data))
+		file, err := s.UploadFileReader(context.Background(), user.ID, tc.name, "TXT", strings.NewReader(tc.data), len(tc.data))
 		if err != nil {
 			t.Fatalf("cannot upload %s: %v", tc.name, err)
 		}
@@ -343,7 +343,7 @@ func TestUpdateDataReaderKeepsOldContentWhenReaderFails(t *testing.T) {
 		t.Fatalf("cannot add user: %v", err)
 	}
 
-	file, err := s.Upload(context.Background(), user.ID, "Notebook", "TXT", []byte("old-data"))
+	file, err := s.UploadFile(context.Background(), user.ID, "Notebook", "TXT", []byte("old-data"))
 	if err != nil {
 		t.Fatalf("cannot upload file: %v", err)
 	}
@@ -368,7 +368,7 @@ func TestReadUsesCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	dataCh, errCh := s.Read(ctx, FileID("does-not-matter"))
+	dataCh, errCh := s.ReadFile(ctx, FileID("does-not-matter"))
 	if chunk, ok := <-dataCh; ok {
 		t.Fatalf("got data chunk %q for canceled read", chunk)
 	}
@@ -393,18 +393,18 @@ func TestListFilesReturnsReadyFilesForOwner(t *testing.T) {
 		t.Fatalf("cannot add other user: %v", err)
 	}
 
-	alpha, err := s.Upload(context.Background(), owner.ID, "alpha", "TXT", []byte("alpha"))
+	alpha, err := s.UploadFile(context.Background(), owner.ID, "alpha", "TXT", []byte("alpha"))
 	if err != nil {
 		t.Fatalf("cannot upload alpha: %v", err)
 	}
-	charlie, err := s.Upload(context.Background(), owner.ID, "charlie", "TXT", []byte("charlie"))
+	charlie, err := s.UploadFile(context.Background(), owner.ID, "charlie", "TXT", []byte("charlie"))
 	if err != nil {
 		t.Fatalf("cannot upload charlie: %v", err)
 	}
-	if _, err := s.PreUpload(context.Background(), owner.ID, "bravo", "TXT", 5); err != nil {
+	if _, err := s.PreUploadFile(context.Background(), owner.ID, "bravo", "TXT", 5); err != nil {
 		t.Fatalf("cannot create unfinished upload: %v", err)
 	}
-	if _, err := s.Upload(context.Background(), other.ID, "delta", "TXT", []byte("delta")); err != nil {
+	if _, err := s.UploadFile(context.Background(), other.ID, "delta", "TXT", []byte("delta")); err != nil {
 		t.Fatalf("cannot upload other user file: %v", err)
 	}
 
@@ -431,7 +431,7 @@ func TestFileBelongsToUser(t *testing.T) {
 		t.Fatalf("cannot add other user: %v", err)
 	}
 
-	file, err := s.Upload(context.Background(), owner.ID, "Notebook", "TXT", []byte("data"))
+	file, err := s.UploadFile(context.Background(), owner.ID, "Notebook", "TXT", []byte("data"))
 	if err != nil {
 		t.Fatalf("cannot upload file: %v", err)
 	}
@@ -483,7 +483,7 @@ func TestDeleteReturnsDatabaseErrorInsteadOfNotFound(t *testing.T) {
 		t.Fatalf("cannot add user Kotik: %v", err)
 	}
 
-	file, err := s.Upload(context.Background(),
+	file, err := s.UploadFile(context.Background(),
 		kotik.ID,
 		"Notebook",
 		"TXT",
@@ -497,7 +497,7 @@ func TestDeleteReturnsDatabaseErrorInsteadOfNotFound(t *testing.T) {
 		t.Fatalf("cannot close database: %v", err)
 	}
 
-	err = s.Delete(context.Background(), file.ID)
+	err = s.DeleteFile(context.Background(), file.ID)
 	if err == nil {
 		t.Fatal("expected database error")
 	}
@@ -514,7 +514,7 @@ func TestDelete(t *testing.T) {
 		t.Fatalf("cannot add user Kotik: %v", err)
 	}
 
-	file, err := s.Upload(context.Background(),
+	file, err := s.UploadFile(context.Background(),
 		kotik.ID,
 		"Notebook",
 		"TXT",
@@ -524,7 +524,7 @@ func TestDelete(t *testing.T) {
 		t.Fatalf("cannot upload Notebook: %v", err)
 	}
 
-	if err := s.Delete(context.Background(), file.ID); err != nil {
+	if err := s.DeleteFile(context.Background(), file.ID); err != nil {
 		t.Fatalf("cannot delete Notebook: %v", err)
 	}
 
@@ -543,12 +543,12 @@ func TestUploadPartRejectsPositionOutsideDeclaredFileSize(t *testing.T) {
 		t.Fatalf("cannot add user Kotik: %v", err)
 	}
 
-	file, err := s.PreUpload(context.Background(), kotik.ID, "Notebook", "TXT", 1)
+	file, err := s.PreUploadFile(context.Background(), kotik.ID, "Notebook", "TXT", 1)
 	if err != nil {
 		t.Fatalf("cannot create pre-upload file: %v", err)
 	}
 
-	_, err = s.UploadPart(context.Background(), file.ID, 1, []byte("extra"))
+	_, err = s.UploadFilePart(context.Background(), file.ID, 1, []byte("extra"))
 	if err == nil {
 		t.Fatal("expected error for upload part outside declared file size")
 	}
@@ -640,7 +640,7 @@ func TestCollectGarbageBlobsKeepsReferencedBlob(t *testing.T) {
 		t.Fatalf("cannot add user Kotik: %v", err)
 	}
 
-	file, err := s.Upload(context.Background(), kotik.ID, "Notebook", "TXT", []byte("Hi man!"))
+	file, err := s.UploadFile(context.Background(), kotik.ID, "Notebook", "TXT", []byte("Hi man!"))
 	if err != nil {
 		t.Fatalf("cannot upload Notebook: %v", err)
 	}
@@ -679,13 +679,13 @@ func TestCollectGarbageBlobsAfterDelete(t *testing.T) {
 		t.Fatalf("cannot add user Kotik: %v", err)
 	}
 
-	file, err := s.Upload(context.Background(), kotik.ID, "Notebook", "TXT", []byte("delete garbage unique blob"))
+	file, err := s.UploadFile(context.Background(), kotik.ID, "Notebook", "TXT", []byte("delete garbage unique blob"))
 	if err != nil {
 		t.Fatalf("cannot upload Notebook: %v", err)
 	}
 
 	uniqueBlobs := uniqueFileBlobs(file)
-	if err := s.Delete(context.Background(), file.ID); err != nil {
+	if err := s.DeleteFile(context.Background(), file.ID); err != nil {
 		t.Fatalf("cannot delete file: %v", err)
 	}
 
@@ -805,7 +805,7 @@ func TestRename(t *testing.T) {
 		t.Fatalf("cannot add user Kotik: %v", err)
 	}
 
-	file, err := s.Upload(context.Background(),
+	file, err := s.UploadFile(context.Background(),
 		kotik.ID,
 		"Notebook",
 		"TXT",
@@ -815,7 +815,7 @@ func TestRename(t *testing.T) {
 		t.Fatalf("cannot upload Notebook: %v", err)
 	}
 
-	renamed, err := s.Rename(context.Background(), file.ID, "Book")
+	renamed, err := s.RenameFile(context.Background(), file.ID, "Book")
 	if err != nil {
 		t.Fatalf("cannot rename Notebook: %v", err)
 	}
@@ -853,7 +853,7 @@ func testUpload(t *testing.T, data []byte) {
 	if err != nil {
 		t.Fatalf("cannot add user Kotik: %v", err)
 	}
-	file, err := s.Upload(context.Background(),
+	file, err := s.UploadFile(context.Background(),
 		kotik.ID,
 		"Movie!",
 		"TXT",
