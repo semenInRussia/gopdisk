@@ -1,16 +1,23 @@
-package storage
+package data
 
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"gopherdisk/internal/blobs"
+)
+
+var (
+	ErrStorageDatabaseRequired = errors.New("when open storage opened database is expected")
 )
 
 var MaxPartSize = blobs.BlobsMaxSize
 
 type Storage struct {
-	bs blobs.BlobStorage
-	db *sql.DB
+	bs    *blobs.BlobStorage
+	db    *sql.DB
+	Users UserModel
+	Files FileModel
 }
 
 func MakeStorage(path string, db *sql.DB) (*Storage, error) {
@@ -24,28 +31,13 @@ func MakeStorage(path string, db *sql.DB) (*Storage, error) {
 	}
 
 	s := Storage{
-		bs: *bs,
-		db: db,
+		bs:    bs,
+		db:    db,
+		Files: FileModel{db: db, bs: bs},
+		Users: UserModel{db: db},
 	}
 
 	return &s, nil
-}
-
-func (s *Storage) FileBelongsToUser(ctx context.Context, fileId FileID, ownerId UserID) (bool, error) {
-	row := s.db.QueryRowContext(
-		ctx,
-		`SELECT EXISTS (SELECT 1 FROM files WHERE id = $1 AND owner_id = $2 AND status = $3)`,
-		fileId,
-		ownerId,
-		FileStatusReady,
-	)
-
-	var exists bool
-	if err := row.Scan(&exists); err != nil {
-		return false, err
-	}
-
-	return exists, nil
 }
 
 func (s *Storage) CollectGarbageBlobs(ctx context.Context) (int, error) {

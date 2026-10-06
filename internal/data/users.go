@@ -1,4 +1,4 @@
-package storage
+package data
 
 import (
 	"context"
@@ -8,6 +8,10 @@ import (
 	"github.com/google/uuid"
 )
 
+var (
+	ErrUserNotFound = errors.New("cannot find an user")
+)
+
 type UserID string
 
 type User struct {
@@ -15,11 +19,15 @@ type User struct {
 	Name string
 }
 
+type UserModel struct {
+	db *sql.DB
+}
+
 func GenerateUserID() UserID {
 	return UserID(uuid.New().String())
 }
 
-func (s *Storage) AddUser(ctx context.Context, name string) (*User, error) {
+func (s *UserModel) Add(ctx context.Context, name string) (*User, error) {
 	id := GenerateUserID()
 	u := User{
 		ID:   id,
@@ -40,11 +48,11 @@ func (s *Storage) AddUser(ctx context.Context, name string) (*User, error) {
 	return &u, nil
 }
 
-func (s *Storage) GetUser(ctx context.Context, userId UserID) (*User, error) {
+func (s *UserModel) Get(ctx context.Context, userId UserID) (*User, error) {
 	return s.loadUser(ctx, userId)
 }
 
-func (s *Storage) DeleteUser(ctx context.Context, user UserID) error {
+func (s *UserModel) Delete(ctx context.Context, user UserID) error {
 	res, err := s.db.ExecContext(ctx, "DELETE FROM users WHERE id = $1", user)
 
 	if err != nil {
@@ -64,7 +72,7 @@ func (s *Storage) DeleteUser(ctx context.Context, user UserID) error {
 	return nil
 }
 
-func (s *Storage) loadUser(ctx context.Context, userId UserID) (*User, error) {
+func (s *UserModel) loadUser(ctx context.Context, userId UserID) (*User, error) {
 	row := s.db.QueryRowContext(
 		ctx,
 		`SELECT id, name FROM users WHERE id = $1`,
