@@ -27,21 +27,23 @@ func GenerateUserID() UserID {
 	return UserID(uuid.New().String())
 }
 
-func (s *UserModel) Add(ctx context.Context, name string) (*User, error) {
-	id := GenerateUserID()
-	u := User{
-		ID:   id,
-		Name: name,
-	}
-
+func (s *UserModel) Insert(ctx context.Context, user User) error {
 	_, err := s.db.ExecContext(
 		ctx,
 		`INSERT INTO users (id, name) VALUES ($1, $2)`,
-		u.ID,
-		u.Name,
+		user.ID,
+		user.Name,
 	)
+	return err
+}
 
-	if err != nil {
+func (s *UserModel) New(ctx context.Context, name string) (*User, error) {
+	u := User{
+		ID:   GenerateUserID(),
+		Name: name,
+	}
+
+	if err := s.Insert(ctx, u); err != nil {
 		return nil, err
 	}
 

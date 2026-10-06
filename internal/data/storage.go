@@ -11,8 +11,6 @@ var (
 	ErrStorageDatabaseRequired = errors.New("when open storage opened database is expected")
 )
 
-var MaxPartSize = blobs.BlobsMaxSize
-
 type Storage struct {
 	bs    *blobs.BlobStorage
 	db    *sql.DB

@@ -26,7 +26,7 @@ func TestPostgresStoragePersistsAndLoadsFile(t *testing.T) {
 		t.Fatalf("cannot create postgres storage: %v", err)
 	}
 
-	user, err := s.Users.Add(context.Background(), "Postgres User")
+	user, err := s.Users.New(context.Background(), "Postgres User")
 	if err != nil {
 		t.Fatalf("cannot add user: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestPostgresStoragePersistsAndLoadsFile(t *testing.T) {
 	})
 
 	data := []byte("postgres backed file")
-	file, err := s.Files.Upload(context.Background(), user.ID, "db-file", "TXT", data)
+	file, err := s.Files.UploadData(context.Background(), user.ID, "db-file", "TXT", data)
 	if err != nil {
 		t.Fatalf("cannot upload file: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestPostgresStoragePersistsAndLoadsFile(t *testing.T) {
 		t.Fatalf("cannot create second postgres storage: %v", err)
 	}
 
-	loadedFile, err := loadedStorage.Files.GetFile(context.Background(), file.ID)
+	loadedFile, err := loadedStorage.Files.Get(context.Background(), file.ID)
 	if err != nil {
 		t.Fatalf("got error from GetFile %v", err)
 	}
@@ -85,7 +85,7 @@ func TestPostgresStoragePersistsAndLoadsFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot create storage after rename: %v", err)
 	}
-	afterRename, err := afterRenameStorage.Files.GetFile(context.Background(), file.ID)
+	afterRename, err := afterRenameStorage.Files.Get(context.Background(), file.ID)
 	if err != nil {
 		t.Fatalf("cannot GetFile after rename: %v", err)
 	}
@@ -96,30 +96,7 @@ func TestPostgresStoragePersistsAndLoadsFile(t *testing.T) {
 		t.Fatalf("got persisted name %q, expected %q", afterRename.Name, "renamed-db-file")
 	}
 
-	updatedData := []byte("updated postgres backed file")
-	updated, err := afterRenameStorage.Files.UpdateData(context.Background(), file.ID, updatedData)
-	if err != nil {
-		t.Fatalf("cannot update file data: %v", err)
-	}
-	for _, blob := range updated.Blobs {
-		t.Cleanup(func() {
-			_, _ = db.ExecContext(context.Background(), `DELETE FROM blobs WHERE hash = $1`, blob.Hash)
-		})
-	}
-
-	afterUpdateStorage, err := MakeStorage(dir, db)
-	if err != nil {
-		t.Fatalf("cannot create storage after update: %v", err)
-	}
-	got, err = readAll(t, afterUpdateStorage, file.ID)
-	if err != nil {
-		t.Fatalf("cannot read updated file: %v", err)
-	}
-	if string(got) != string(updatedData) {
-		t.Fatalf("got updated data %q, expected %q", got, updatedData)
-	}
-
-	if err := afterUpdateStorage.Files.Delete(context.Background(), file.ID); err != nil {
+	if err := afterRenameStorage.Files.Delete(context.Background(), file.ID); err != nil {
 		t.Fatalf("cannot delete file: %v", err)
 	}
 
@@ -127,7 +104,7 @@ func TestPostgresStoragePersistsAndLoadsFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot create storage after delete: %v", err)
 	}
-	gotFile, err := afterDeleteStorage.Files.GetFile(context.Background(), file.ID)
+	gotFile, err := afterDeleteStorage.Files.Get(context.Background(), file.ID)
 	if err != nil {
 		t.Fatalf("GetFile after delete returned err: %v", err)
 	}
