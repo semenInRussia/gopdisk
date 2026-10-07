@@ -266,11 +266,11 @@ func TestNewAddDataCommitAndRead(t *testing.T) {
 		t.Fatalf("cannot add user Kotik: %v", err)
 	}
 
-	file, err := s.Files.New(context.Background(), kotik.ID, "Notebook", "TXT", len("hello-world"))
+	file, err := s.Files.New(context.Background(), kotik.ID, "Notebook", "TXT", int64(len("hello-world")))
 	if err != nil {
 		t.Fatalf("cannot create file: %v", err)
 	}
-	if file.Size != len("hello-world") || file.Status != FileStatusUploading {
+	if file.Size != int64(len("hello-world")) || file.Status != FileStatusUploading {
 		t.Fatalf("new file has wrong metadata: %+v", file)
 	}
 	fileBlobs, err := s.Files.GetBlobs(context.Background(), file.ID)
@@ -304,11 +304,11 @@ func TestNewAddDataCommitAndRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot get committed file blobs: %v", err)
 	}
-	if loaded.Size != len("hello-world") || len(fileBlobs) != 3 {
+	if loaded.Size != int64(len("hello-world")) || len(fileBlobs) != 3 {
 		t.Fatalf("got size %d and %d blobs, expected size 11 and 3 blobs", loaded.Size, len(fileBlobs))
 	}
 	for i, expectedSize := range []int{3, 4, 4} {
-		if fileBlobs[i].Size != expectedSize {
+		if fileBlobs[i].Size != int64(expectedSize) {
 			t.Fatalf("blob %d has size %d, expected %d", i, fileBlobs[i].Size, expectedSize)
 		}
 	}
@@ -361,7 +361,7 @@ func TestUploadReaderAndRead(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		file, err := s.Files.UploadReader(context.Background(), user.ID, tc.name, "TXT", strings.NewReader(tc.data), len(tc.data))
+		file, err := s.Files.UploadReader(context.Background(), user.ID, tc.name, "TXT", strings.NewReader(tc.data), int64(len(tc.data)))
 		if err != nil {
 			t.Fatalf("cannot upload %s: %v", tc.name, err)
 		}
@@ -386,7 +386,7 @@ func TestAddReaderAndAddBlob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot add user: %v", err)
 	}
-	file, err := s.Files.New(context.Background(), user.ID, "mixed", "TXT", len("abcdefg"))
+	file, err := s.Files.New(context.Background(), user.ID, "mixed", "TXT", int64(len("abcdefg")))
 	if err != nil {
 		t.Fatalf("cannot create file: %v", err)
 	}
@@ -622,7 +622,7 @@ func TestAddDataRejectsCommittedFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot get committed file blobs: %v", err)
 	}
-	if loaded.Size != len("data") || len(fileBlobs) != 1 {
+	if loaded.Size != int64(len("data")) || len(fileBlobs) != 1 {
 		t.Fatalf("committed file changed after rejected add: %+v", loaded)
 	}
 }
@@ -679,7 +679,7 @@ func TestCollectGarbageDeletesBlobsOutsideDb(t *testing.T) {
 		t.Fatalf("got %d deleted blobs, expected 1", deleted)
 	}
 
-	blob := blobs.Blob{Hash: hash, Size: len(content)}
+	blob := blobs.Blob{Hash: hash, Size: int64(len(content))}
 
 	if blobFileExists(t, s, blob) {
 		t.Fatalf("orphaned blob file %q still exists", blob.Hash)

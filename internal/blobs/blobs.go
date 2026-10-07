@@ -15,7 +15,7 @@ import (
 	"sync"
 )
 
-var BlobsMaxSize int = 16 * 1024 * 1024 // 16MB
+var BlobsMaxSize int64 = 16 * 1024 * 1024 // 16MB
 var ErrBlobOverflow = errors.New("probided data for one blob is more than expected")
 
 type BlobStorage struct {
@@ -24,7 +24,7 @@ type BlobStorage struct {
 
 type Blob struct {
 	Hash string
-	Size int
+	Size int64
 }
 
 func MakeBlobStorage(path string) (*BlobStorage, error) {
@@ -37,7 +37,7 @@ func MakeBlobStorage(path string) (*BlobStorage, error) {
 
 // write data to correct file on file system, return hash of given data
 func (bs *BlobStorage) AddData(data []byte) ([]Blob, error) {
-	size := len(data)
+	size := int64(len(data))
 	blobs := make([]Blob, ComputeChunksAmount(size))
 
 	i := 0
@@ -75,8 +75,8 @@ func SplitDataOnChunks(data []byte) chan []byte {
 	ch := make(chan []byte)
 
 	go func() {
-		size := len(data)
-		l := 0
+		size := int64(len(data))
+		var l int64 = 0
 		for l < size {
 			r := min(l+BlobsMaxSize, size)
 			ch <- data[l:r]
@@ -89,7 +89,7 @@ func SplitDataOnChunks(data []byte) chan []byte {
 }
 
 func (bs *BlobStorage) AddOneChunk(data []byte) (*Blob, error) {
-	size := len(data)
+	size := int64(len(data))
 	if size > BlobsMaxSize {
 		return nil, ErrBlobOverflow
 	}
@@ -122,7 +122,7 @@ func (bs *BlobStorage) ListBlobs() ([]Blob, error) {
 
 		blobs = append(blobs, Blob{
 			Hash: entry.Name(),
-			Size: int(info.Size()),
+			Size: info.Size(),
 		})
 	}
 
@@ -181,7 +181,7 @@ func (bs *BlobStorage) ReadBlob(blob Blob) ([]byte, error) {
 	return res, nil
 }
 
-func ComputeChunksAmount(size int) int {
+func ComputeChunksAmount(size int64) int64 {
 	return (size + BlobsMaxSize - 1) / BlobsMaxSize
 }
 

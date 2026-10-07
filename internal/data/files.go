@@ -39,7 +39,7 @@ type File struct {
 	Filetype FileKind
 	OwnerID  UserID
 	Status   FileStatus
-	Size     int
+	Size     int64
 }
 
 type FileModel struct {
@@ -58,7 +58,7 @@ func (s *FileModel) Insert(ctx context.Context, file File) error {
 }
 
 // New constructs and inserts an empty file that can receive blobs before Commit.
-func (s *FileModel) New(ctx context.Context, ownerID UserID, name string, fileType FileKind, size int) (*File, error) {
+func (s *FileModel) New(ctx context.Context, ownerID UserID, name string, fileType FileKind, size int64) (*File, error) {
 	file := File{
 		ID: GenerateFileID(), Name: name, Filetype: fileType, OwnerID: ownerID,
 		Status: FileStatusUploading, Size: size,
@@ -97,7 +97,7 @@ func (s *FileModel) GetBlobs(ctx context.Context, fileID FileID) ([]blobs.Blob, 
 			return nil, err
 		}
 		if hash.Valid {
-			fileBlobs = append(fileBlobs, blobs.Blob{Hash: hash.String, Size: int(size.Int64)})
+			fileBlobs = append(fileBlobs, blobs.Blob{Hash: hash.String, Size: size.Int64})
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -111,7 +111,7 @@ func (s *FileModel) GetBlobs(ctx context.Context, fileID FileID) ([]blobs.Blob, 
 
 // UploadData is a shortcut for New, AddData, and Commit.
 func (s *FileModel) UploadData(ctx context.Context, ownerID UserID, name string, fileType FileKind, data []byte) (*File, error) {
-	file, err := s.New(ctx, ownerID, name, fileType, len(data))
+	file, err := s.New(ctx, ownerID, name, fileType, int64(len(data)))
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +127,7 @@ func (s *FileModel) UploadData(ctx context.Context, ownerID UserID, name string,
 }
 
 // UploadReader is a shortcut for New, AddReader, and Commit.
-func (s *FileModel) UploadReader(ctx context.Context, ownerID UserID, name string, fileType FileKind, reader io.Reader, size int) (*File, error) {
+func (s *FileModel) UploadReader(ctx context.Context, ownerID UserID, name string, fileType FileKind, reader io.Reader, size int64) (*File, error) {
 	file, err := s.New(ctx, ownerID, name, fileType, size)
 	if err != nil {
 		return nil, err
