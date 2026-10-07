@@ -39,9 +39,13 @@ func TestPostgresStoragePersistsAndLoadsFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot upload file: %v", err)
 	}
+	fileBlobs, err := s.Files.GetBlobs(context.Background(), file.ID)
+	if err != nil {
+		t.Fatalf("cannot get uploaded file blobs: %v", err)
+	}
 	t.Cleanup(func() {
 		_, _ = db.ExecContext(context.Background(), `DELETE FROM files WHERE id = $1`, file.ID)
-		for _, blob := range file.Blobs {
+		for _, blob := range fileBlobs {
 			_, _ = db.ExecContext(context.Background(), `DELETE FROM blobs WHERE hash = $1`, blob.Hash)
 		}
 	})
@@ -61,8 +65,12 @@ func TestPostgresStoragePersistsAndLoadsFile(t *testing.T) {
 	if loadedFile.ID != file.ID {
 		t.Fatalf("got file ID %q, expected %q", loadedFile.ID, file.ID)
 	}
-	if len(loadedFile.Blobs) != len(file.Blobs) {
-		t.Fatalf("got %d blobs, expected %d", len(loadedFile.Blobs), len(file.Blobs))
+	loadedBlobs, err := loadedStorage.Files.GetBlobs(context.Background(), file.ID)
+	if err != nil {
+		t.Fatalf("cannot get loaded file blobs: %v", err)
+	}
+	if len(loadedBlobs) != len(fileBlobs) {
+		t.Fatalf("got %d blobs, expected %d", len(loadedBlobs), len(fileBlobs))
 	}
 
 	got, err := readAll(t, loadedStorage, file.ID)

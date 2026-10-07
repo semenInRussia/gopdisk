@@ -270,8 +270,15 @@ func TestNewAddDataCommitAndRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot create file: %v", err)
 	}
-	if file.Size != len("hello-world") || len(file.Blobs) != 0 || file.Status != FileStatusUploading {
-		t.Fatalf("new file has wrong metadata or already has blobs: %+v", file)
+	if file.Size != len("hello-world") || file.Status != FileStatusUploading {
+		t.Fatalf("new file has wrong metadata: %+v", file)
+	}
+	fileBlobs, err := s.Files.GetBlobs(context.Background(), file.ID)
+	if err != nil {
+		t.Fatalf("cannot get new file blobs: %v", err)
+	}
+	if len(fileBlobs) != 0 {
+		t.Fatalf("new file already has %d blobs", len(fileBlobs))
 	}
 	for i, part := range [][]byte{[]byte("hel"), []byte("lo-world")} {
 		if _, err := s.Files.AddData(context.Background(), file.ID, part); err != nil {
@@ -293,8 +300,17 @@ func TestNewAddDataCommitAndRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot reload file: %v", err)
 	}
-	if loaded.Size != len("hello-world") || len(loaded.Blobs) != 3 {
-		t.Fatalf("got size %d and %d blobs, expected size 11 and 3 blobs", loaded.Size, len(loaded.Blobs))
+	fileBlobs, err = s.Files.GetBlobs(context.Background(), file.ID)
+	if err != nil {
+		t.Fatalf("cannot get committed file blobs: %v", err)
+	}
+	if loaded.Size != len("hello-world") || len(fileBlobs) != 3 {
+		t.Fatalf("got size %d and %d blobs, expected size 11 and 3 blobs", loaded.Size, len(fileBlobs))
+	}
+	for i, expectedSize := range []int{3, 4, 4} {
+		if fileBlobs[i].Size != expectedSize {
+			t.Fatalf("blob %d has size %d, expected %d", i, fileBlobs[i].Size, expectedSize)
+		}
 	}
 }
 
@@ -515,6 +531,15 @@ func TestReadNotFound(t *testing.T) {
 	}
 }
 
+func TestGetBlobsNotFound(t *testing.T) {
+	s := getStorage(t)
+
+	_, err := s.Files.GetBlobs(context.Background(), GenerateFileID())
+	if !errors.Is(err, ErrFileNotFound) {
+		t.Fatalf("got error %v, expected %v", err, ErrFileNotFound)
+	}
+}
+
 func TestDeleteReturnsDatabaseErrorInsteadOfNotFound(t *testing.T) {
 	s := getStorage(t)
 
@@ -593,7 +618,11 @@ func TestAddDataRejectsCommittedFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot load committed file: %v", err)
 	}
-	if loaded.Size != len("data") || len(loaded.Blobs) != 1 {
+	fileBlobs, err := s.Files.GetBlobs(context.Background(), file.ID)
+	if err != nil {
+		t.Fatalf("cannot get committed file blobs: %v", err)
+	}
+	if loaded.Size != len("data") || len(fileBlobs) != 1 {
 		t.Fatalf("committed file changed after rejected add: %+v", loaded)
 	}
 }
@@ -669,6 +698,10 @@ func TestCollectGarbageBlobsKeepsReferencedBlob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot upload Notebook: %v", err)
 	}
+	fileBlobs, err := s.Files.GetBlobs(context.Background(), file.ID)
+	if err != nil {
+		t.Fatalf("cannot get file blobs: %v", err)
+	}
 
 	deleted, err := s.CollectGarbageBlobs(context.Background())
 	if err != nil {
@@ -678,7 +711,7 @@ func TestCollectGarbageBlobsKeepsReferencedBlob(t *testing.T) {
 		t.Fatalf("got %d deleted blobs, expected 0", deleted)
 	}
 
-	for _, blob := range file.Blobs {
+	for _, blob := range fileBlobs {
 		if !blobRowExists(t, s.db, blob.Hash) {
 			t.Fatalf("referenced blob row %q was deleted", blob.Hash)
 		}
@@ -708,8 +741,11 @@ func TestCollectGarbageBlobsAfterDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot upload Notebook: %v", err)
 	}
-
-	uniqueBlobs := uniqueFileBlobs(file)
+	fileBlobs, err := s.Files.GetBlobs(context.Background(), file.ID)
+	if err != nil {
+		t.Fatalf("cannot get file blobs: %v", err)
+	}
+	uniqueBlobs := uniqueFileBlobs(fileBlobs)
 	if err := s.Files.Delete(context.Background(), file.ID); err != nil {
 		t.Fatalf("cannot delete file: %v", err)
 	}
@@ -807,11 +843,11 @@ func blobFileExists(t *testing.T, s *Storage, blob blobs.Blob) bool {
 	return false
 }
 
-func uniqueFileBlobs(file *File) []blobs.Blob {
+func uniqueFileBlobs(fileBlobs []blobs.Blob) []blobs.Blob {
 	seen := make(map[string]bool)
 	var unique []blobs.Blob
 
-	for _, blob := range file.Blobs {
+	for _, blob := range fileBlobs {
 		if seen[blob.Hash] {
 			continue
 		}

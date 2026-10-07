@@ -39,7 +39,6 @@ type File struct {
 	Filetype FileKind
 	OwnerID  UserID
 	Status   FileStatus
-	Blobs    []blobs.Blob
 	Size     int
 }
 
@@ -52,32 +51,17 @@ func GenerateFileID() FileID { return FileID(uuid.New().String()) }
 
 // Insert persists an already constructed file without changing its fields.
 func (s *FileModel) Insert(ctx context.Context, file File) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	_, err = tx.ExecContext(ctx, `INSERT INTO files (id, name, owner_id, filetype, size, status)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO files (id, name, owner_id, filetype, size, status)
 		VALUES ($1, $2, $3, $4, $5, $6)`,
 		file.ID, file.Name, file.OwnerID, file.Filetype, file.Size, file.Status)
-	if err != nil {
-		return handleStorageDatabaseError(err)
-	}
-	if err := saveFileBlobs(ctx, tx, &file); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return handleStorageDatabaseError(err)
 }
 
 // New constructs and inserts an empty file that can receive blobs before Commit.
 func (s *FileModel) New(ctx context.Context, ownerID UserID, name string, fileType FileKind, size int) (*File, error) {
 	file := File{
 		ID: GenerateFileID(), Name: name, Filetype: fileType, OwnerID: ownerID,
-		Status: FileStatusUploading, Blobs: []blobs.Blob{}, Size: size,
+		Status: FileStatusUploading, Size: size,
 	}
 	if err := s.Insert(ctx, file); err != nil {
 		return nil, err
@@ -87,6 +71,42 @@ func (s *FileModel) New(ctx context.Context, ownerID UserID, name string, fileTy
 
 func (s *FileModel) Get(ctx context.Context, fileID FileID) (*File, error) {
 	return s.loadFileResult(ctx, fileID, FileStatusReady)
+}
+
+// GetBlobs returns file blobs in their logical order.
+func (s *FileModel) GetBlobs(ctx context.Context, fileID FileID) ([]blobs.Blob, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT b.hash, b.size
+		FROM files f
+		LEFT JOIN file_blobs fb ON fb.file_id = f.id
+		LEFT JOIN blobs b ON b.hash = fb.blob_hash
+		WHERE f.id = $1
+		ORDER BY fb.position`, fileID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	fileBlobs := make([]blobs.Blob, 0)
+	found := false
+	for rows.Next() {
+		found = true
+		var hash sql.NullString
+		var size sql.NullInt64
+		if err := rows.Scan(&hash, &size); err != nil {
+			return nil, err
+		}
+		if hash.Valid {
+			fileBlobs = append(fileBlobs, blobs.Blob{Hash: hash.String, Size: int(size.Int64)})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, ErrFileNotFound
+	}
+	return fileBlobs, nil
 }
 
 // UploadData is a shortcut for New, AddData, and Commit.
@@ -233,40 +253,35 @@ func (s *FileModel) Read(ctx context.Context, fileID FileID) (<-chan []byte, <-c
 	if file == nil {
 		return closedReadChannels(ErrFileNotFound)
 	}
-	return s.bs.ReadBlobsContext(ctx, file.Blobs)
+	fileBlobs, err := s.GetBlobs(ctx, fileID)
+	if err != nil {
+		return closedReadChannels(err)
+	}
+	return s.bs.ReadBlobsContext(ctx, fileBlobs)
 }
 
 func (s *FileModel) List(ctx context.Context, ownerID UserID) ([]File, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id FROM files WHERE owner_id = $1 AND status = $2 ORDER BY name, id`,
+		`SELECT id, name, filetype, owner_id, status, size
+		FROM files WHERE owner_id = $1 AND status = $2 ORDER BY name, id`,
 		ownerID, FileStatusReady)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var fileIDs []FileID
+	var files []File
 	for rows.Next() {
-		var fileID FileID
-		if err := rows.Scan(&fileID); err != nil {
+		var file File
+		if err := rows.Scan(&file.ID, &file.Name, &file.Filetype, &file.OwnerID, &file.Status, &file.Size); err != nil {
 			return nil, err
 		}
-		fileIDs = append(fileIDs, fileID)
+		files = append(files, file)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
-	files := make([]File, 0, len(fileIDs))
-	for _, fileID := range fileIDs {
-		file, err := s.loadFileResult(ctx, fileID, FileStatusReady)
-		if err != nil {
-			return nil, err
-		}
-		if file != nil {
-			files = append(files, *file)
-		}
-	}
 	return files, nil
 }
 
@@ -298,22 +313,6 @@ func (s *FileModel) loadFileResult(ctx context.Context, fileID FileID, status Fi
 		return nil, err
 	}
 
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT blob_hash, blob_size FROM file_blob_view WHERE file_id = $1 ORDER BY position`, fileID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var blob blobs.Blob
-		if err := rows.Scan(&blob.Hash, &blob.Size); err != nil {
-			return nil, err
-		}
-		file.Blobs = append(file.Blobs, blob)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
 	return &file, nil
 }
 
@@ -393,21 +392,6 @@ func closedReadChannels(err error) (<-chan []byte, <-chan error) {
 	}
 	close(errCh)
 	return dataCh, errCh
-}
-
-func saveFileBlobs(ctx context.Context, tx *sql.Tx, file *File) error {
-	for position, blob := range file.Blobs {
-		if err := saveBlob(ctx, tx, blob); err != nil {
-			return err
-		}
-		_, err := tx.ExecContext(ctx,
-			`INSERT INTO file_blobs (file_id, blob_hash, position) VALUES ($1, $2, $3)`,
-			file.ID, blob.Hash, position)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func saveBlob(ctx context.Context, tx *sql.Tx, blob blobs.Blob) error {
