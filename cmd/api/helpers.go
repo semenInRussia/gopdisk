@@ -6,7 +6,6 @@ import (
 	"gopherdisk/internal/validator"
 	"maps"
 	"net/http"
-	"strconv"
 
 	"github.com/julienschmidt/httprouter"
 )
@@ -65,11 +64,11 @@ func (app *Application) writeValidatorErrors(w http.ResponseWriter, v *validator
 	app.errorResponse(w, v.Errors, status)
 }
 
-func (app *Application) getIdParam(r *http.Request) (int64, error) {
+func (app *Application) getIdParam(r *http.Request) (string, error) {
 	params := httprouter.ParamsFromContext(r.Context())
-	id, err := strconv.ParseInt(params.ByName("id"), 10, 64)
-	if err != nil || id < 1 {
-		return 0, errors.New("invalid id")
+	id := params.ByName("id")
+	if id == "" {
+		return "", errors.New("id is required, but not provided")
 	}
 	return id, nil
 }
