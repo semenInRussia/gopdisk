@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 
+	"gopherdisk/internal/validator"
+
 	"github.com/google/uuid"
 )
 
@@ -72,6 +74,14 @@ func (s *UserModel) Delete(ctx context.Context, user UserID) error {
 	}
 
 	return nil
+}
+
+func ValidateUser(v *validator.Validator, user User) {
+	ValidateUserName(v, user.Name)
+}
+
+func ValidateUserName(v *validator.Validator, userName string) {
+	v.Check("user", userName != "", "user's name cannot be empty")
 }
 
 func (s *UserModel) loadUser(ctx context.Context, userId UserID) (*User, error) {

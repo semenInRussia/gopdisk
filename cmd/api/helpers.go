@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"gopherdisk/internal/validator"
 	"maps"
 	"net/http"
 	"strconv"
@@ -45,7 +46,7 @@ func (app *Application) logError(err error) {
 	app.logger.Println(err)
 }
 
-func (app *Application) errorResponse(w http.ResponseWriter, msg interface{}, status int) {
+func (app *Application) errorResponse(w http.ResponseWriter, msg any, status int) {
 	data := Envelope{
 		"error": msg,
 	}
@@ -54,6 +55,14 @@ func (app *Application) errorResponse(w http.ResponseWriter, msg interface{}, st
 		app.logError(err)
 		w.WriteHeader(500)
 	}
+}
+
+func (app *Application) writeValidatorErrors(w http.ResponseWriter, v *validator.Validator) {
+	status := http.StatusUnprocessableEntity
+	if v.IsValid() {
+		status = http.StatusOK
+	}
+	app.errorResponse(w, v.Errors, status)
 }
 
 func (app *Application) getIdParam(r *http.Request) (int64, error) {
