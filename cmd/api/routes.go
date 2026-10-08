@@ -1,37 +1,17 @@
 package main
 
 import (
-	"encoding/json"
-	"maps"
 	"net/http"
+	"time"
 
 	"github.com/julienschmidt/httprouter"
 )
 
-func (app *Application) writeJSON(
-	w http.ResponseWriter,
-	data interface{},
-	status int,
-	headers http.Header,
-) error {
-	js, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-	js = append(js, '\n')
-
-	maps.Copy(w.Header(), headers)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	w.Write(js)
-
-	return nil
-}
-
-func (app *Application) mainHandler(w http.ResponseWriter, r *http.Request) {
-	body := map[string]string{
-		"hello": "seaman",
+func (app *Application) healthCheckHandler(w http.ResponseWriter, r *http.Request) {
+	body := map[string]any{
+		"status":  "available",
+		"version": version,
+		"time":    time.Now(),
 	}
 	app.writeJSON(w, body, 203, nil)
 }
@@ -39,7 +19,7 @@ func (app *Application) mainHandler(w http.ResponseWriter, r *http.Request) {
 func (app *Application) routes() *httprouter.Router {
 	router := httprouter.New()
 
-	router.HandlerFunc(http.MethodGet, "/v1/main", app.mainHandler)
+	router.HandlerFunc(http.MethodGet, "/v1/healthcheck", app.healthCheckHandler)
 
 	return router
 }
