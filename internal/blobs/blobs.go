@@ -23,8 +23,8 @@ type BlobStorage struct {
 }
 
 type Blob struct {
-	Hash string
-	Size int64
+	Hash string `json:"hash"`
+	Size int64  `json:"size"`
 }
 
 func MakeBlobStorage(path string) (*BlobStorage, error) {

@@ -17,8 +17,8 @@ var (
 type UserID string
 
 type User struct {
-	ID   UserID
-	Name string
+	ID   UserID `json:"id"`
+	Name string `json:"name"`
 }
 
 type UserModel struct {

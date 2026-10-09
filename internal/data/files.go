@@ -34,12 +34,12 @@ const (
 )
 
 type File struct {
-	ID       FileID
-	Name     string
-	Filetype FileKind
-	OwnerID  UserID
-	Status   FileStatus
-	Size     int64
+	ID       FileID     `json:"id"`
+	Name     string     `json:"name"`
+	Filetype FileKind   `json:"filetype"`
+	OwnerID  UserID     `json:"owner_id"`
+	Status   FileStatus `json:"status"`
+	Size     int64      `json:"size"`
 }
 
 type FileModel struct {
