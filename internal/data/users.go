@@ -53,15 +53,29 @@ func (s *UserModel) New(ctx context.Context, name string) (*User, error) {
 }
 
 func (s *UserModel) Get(ctx context.Context, userId UserID) (*User, error) {
-	return s.loadUser(ctx, userId)
+	row := s.db.QueryRowContext(
+		ctx,
+		`SELECT id, name FROM users WHERE id = $1`,
+		userId,
+	)
+
+	var user User
+	err := row.Scan(&user.ID, &user.Name)
+
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, ErrUserNotFound
+		default:
+			return nil, err
+		}
+	}
+
+	return &user, nil
 }
 
 func (s *UserModel) Delete(ctx context.Context, user UserID) error {
 	res, err := s.db.ExecContext(ctx, "DELETE FROM users WHERE id = $1", user)
-
-	if err != nil {
-		return err
-	}
 
 	cnt, err := res.RowsAffected()
 
@@ -82,24 +96,4 @@ func ValidateUser(v *validator.Validator, user User) {
 
 func ValidateUserName(v *validator.Validator, userName string) {
 	v.Check("user", userName != "", "user's name cannot be empty")
-}
-
-func (s *UserModel) loadUser(ctx context.Context, userId UserID) (*User, error) {
-	row := s.db.QueryRowContext(
-		ctx,
-		`SELECT id, name FROM users WHERE id = $1`,
-		userId,
-	)
-
-	var user User
-	err := row.Scan(&user.ID, &user.Name)
-
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	return &user, nil
 }

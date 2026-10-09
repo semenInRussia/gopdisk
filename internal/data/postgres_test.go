@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 
@@ -113,8 +114,8 @@ func TestPostgresStoragePersistsAndLoadsFile(t *testing.T) {
 		t.Fatalf("cannot create storage after delete: %v", err)
 	}
 	gotFile, err := afterDeleteStorage.Files.Get(context.Background(), file.ID)
-	if err != nil {
-		t.Fatalf("GetFile after delete returned err: %v", err)
+	if !errors.Is(err, ErrFileNotFound) {
+		t.Fatalf("got error %v, expected %v", err, ErrFileNotFound)
 	}
 	if gotFile != nil {
 		t.Fatalf("GetFile after delete returned file %q", gotFile.ID)

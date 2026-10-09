@@ -229,9 +229,6 @@ func (s *FileModel) Rename(ctx context.Context, fileID FileID, newName string) (
 	if err != nil {
 		return nil, err
 	}
-	if file == nil {
-		return nil, ErrFileNotFound
-	}
 	_, err = s.db.ExecContext(ctx,
 		`UPDATE files SET name = $1 WHERE id = $2 AND status = $3`,
 		newName, fileID, FileStatusReady)
@@ -306,11 +303,14 @@ func (s *FileModel) loadFileResult(ctx context.Context, fileID FileID, status Fi
 	row := s.db.QueryRowContext(ctx, query, args...)
 
 	var file File
-	if err := row.Scan(&file.ID, &file.Name, &file.Filetype, &file.OwnerID, &file.Status, &file.Size); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
+	err := row.Scan(&file.ID, &file.Name, &file.Filetype, &file.OwnerID, &file.Status, &file.Size)
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, ErrFileNotFound
+		default:
+			return nil, err
 		}
-		return nil, err
 	}
 
 	return &file, nil

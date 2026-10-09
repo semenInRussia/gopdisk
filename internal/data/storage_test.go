@@ -125,6 +125,18 @@ func TestAddUserUsesCanceledContext(t *testing.T) {
 	}
 }
 
+func TestGetUserReturnsNotFound(t *testing.T) {
+	s := getStorage(t)
+
+	got, err := s.Users.Get(context.Background(), GenerateUserID())
+	if !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("got error %v, expected %v", err, ErrUserNotFound)
+	}
+	if got != nil {
+		t.Fatalf("got user %+v, expected nil", got)
+	}
+}
+
 func TestInsertUserPersistsConstructedUser(t *testing.T) {
 	s := getStorage(t)
 	user := User{ID: GenerateUserID(), Name: "Constructed"}
@@ -159,6 +171,18 @@ func TestInsertFilePersistsConstructedFile(t *testing.T) {
 	}
 	if got == nil || got.ID != file.ID || got.Status != file.Status || got.Size != file.Size {
 		t.Fatalf("got %+v, expected %+v", got, file)
+	}
+}
+
+func TestGetFileReturnsNotFound(t *testing.T) {
+	s := getStorage(t)
+
+	got, err := s.Files.Get(context.Background(), GenerateFileID())
+	if !errors.Is(err, ErrFileNotFound) {
+		t.Fatalf("got error %v, expected %v", err, ErrFileNotFound)
+	}
+	if got != nil {
+		t.Fatalf("got file %+v, expected nil", got)
 	}
 }
 
@@ -201,8 +225,8 @@ func TestDeleteUser(t *testing.T) {
 	}
 
 	got, err := s.Users.Get(context.Background(), user.ID)
-	if err != nil {
-		t.Fatalf("cannot get exist user: %v", err)
+	if !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("got error %v, expected %v", err, ErrUserNotFound)
 	}
 	if got != nil {
 		t.Fatalf("got deleted user %+v, expected nil", got)
