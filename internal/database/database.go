@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"os"
+	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -27,7 +28,12 @@ func Open(ctx context.Context, databaseURL string) (*sql.DB, error) {
 		return nil, err
 	}
 
-	if err := Ping(ctx, db); err != nil {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	err = Ping(ctx, db)
+
+	if err != nil {
 		closeErr := db.Close()
 		if closeErr != nil {
 			return nil, closeErr
