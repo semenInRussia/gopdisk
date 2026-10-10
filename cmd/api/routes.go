@@ -8,7 +8,7 @@ import (
 )
 
 func (app *Application) healthCheckHandler(w http.ResponseWriter, r *http.Request) {
-	body := map[string]any{
+	body := Envelope{
 		"status":  "available",
 		"version": version,
 		"time":    time.Now(),
