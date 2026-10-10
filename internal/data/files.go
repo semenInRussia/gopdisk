@@ -49,21 +49,31 @@ type FileModel struct {
 
 func GenerateFileID() FileID { return FileID(uuid.New().String()) }
 
+func (s *FileModel) Insert(ctx context.Context, file *File) error {
+	file.Status = FileStatusUploading
+	return s.InsertWithStatus(ctx, file)
+}
+
 // Insert persists an already constructed file without changing its fields.
-func (s *FileModel) Insert(ctx context.Context, file File) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO files (id, name, owner_id, filetype, size, status)
-		VALUES ($1, $2, $3, $4, $5, $6)`,
-		file.ID, file.Name, file.OwnerID, file.Filetype, file.Size, file.Status)
+func (s *FileModel) InsertWithStatus(ctx context.Context, file *File) error {
+	query := `
+		INSERT INTO files (id, name, owner_id, filetype, size, status)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id`
+
+	args := []any{GenerateFileID(), file.Name, file.OwnerID, file.Filetype, file.Size, file.Status}
+
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(&file.ID)
+
 	return handleStorageDatabaseError(err)
 }
 
 // New constructs and inserts an empty file that can receive blobs before Commit.
 func (s *FileModel) New(ctx context.Context, ownerID UserID, name string, fileType FileKind, size int64) (*File, error) {
 	file := File{
-		ID: GenerateFileID(), Name: name, Filetype: fileType, OwnerID: ownerID,
-		Status: FileStatusUploading, Size: size,
+		ID: GenerateFileID(), Name: name, Filetype: fileType, OwnerID: ownerID, Size: size,
 	}
-	if err := s.Insert(ctx, file); err != nil {
+	if err := s.Insert(ctx, &file); err != nil {
 		return nil, err
 	}
 	return &file, nil

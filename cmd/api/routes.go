@@ -27,6 +27,7 @@ func (app *Application) routes() http.Handler {
 
 	// Files
 	router.HandlerFunc(http.MethodGet, "/v1/files/:id", app.filesGetHandler)
+	router.HandlerFunc(http.MethodPost, "/v1/files/upload", app.filesUploadsPostHandler)
 
 	return app.recoverPanic(router)
 }

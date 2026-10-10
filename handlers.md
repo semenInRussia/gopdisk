@@ -2,13 +2,13 @@ Yes—resumable part uploads fit this project well. I’d separate upload manage
 
 ### Upload routes
 
-| Method   | Path                                                  | Purpose                                                      |
-| -------- | ----------------------------------------------------- | ------------------------------------------------------------ |
-| `POST`   | `/v1/users/:user_id/uploads`                          | Start an upload; accept `name`, `filetype`, and total `size` |
-| `GET`    | `/v1/users/:user_id/uploads/:file_id`                 | Get upload status and uploaded parts                         |
-| `PUT`    | `/v1/users/:user_id/uploads/:file_id/parts/:position` | Upload or replace one part                                   |
-| `POST`   | `/v1/users/:user_id/uploads/:file_id/complete`        | Validate all parts and mark the file ready                   |
-| `DELETE` | `/v1/users/:user_id/uploads/:file_id`                 | Cancel an unfinished upload                                  |
+| Method   | Path                                         | Purpose                                                      |
+| -------- | -------------------------------------------- | ------------------------------------------------------------ |
+| `POST`   | `/v1/files/uploads`                          | Start an upload; accept `name`, `filetype`, and total `size` |
+| `GET`    | `/v1/files/uploads/:file_id`                 | Get upload status and uploaded parts                         |
+| `PUT`    | `/v1/files/uploads/:file_id/parts/:position` | Upload or replace one part                                   |
+| `POST`   | `/v1/files/uploads/:file_id/complete`        | Validate all parts and mark the file ready                   |
+| `DELETE` | `/v1/files/uploads/:file_id`                 | Cancel an unfinished upload                                  |
 
 Use zero-based positions:
 

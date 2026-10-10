@@ -162,7 +162,7 @@ func TestInsertFilePersistsConstructedFile(t *testing.T) {
 		ID: GenerateFileID(), Name: "Empty", Filetype: "TXT", OwnerID: kotik.ID,
 		Status: FileStatusReady, Size: 0,
 	}
-	if err := s.Files.Insert(context.Background(), file); err != nil {
+	if err := s.Files.InsertWithStatus(context.Background(), &file); err != nil {
 		t.Fatalf("cannot insert file: %v", err)
 	}
 	got, err := s.Files.Get(context.Background(), file.ID)
@@ -192,7 +192,7 @@ func TestInsertRejectsNegativeSize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot add user Kotik: %v", err)
 	}
-	err = s.Files.Insert(context.Background(), File{
+	err = s.Files.InsertWithStatus(context.Background(), &File{
 		ID: GenerateFileID(), Name: "Invalid", Filetype: "TXT", OwnerID: kotik.ID,
 		Status: FileStatusUploading, Size: -1,
 	})
