@@ -199,6 +199,50 @@ func TestUsersGetEndpoint(t *testing.T) {
 	})
 }
 
+func TestUsersDeleteEndpoint(t *testing.T) {
+	const userID = "baab6197-3e2d-4969-8492-247bbba900dc"
+	query := regexp.QuoteMeta("DELETE FROM users WHERE id = $1")
+
+	t.Run("deletes user", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectExec(query).
+			WithArgs(data.UserID(userID)).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+
+		recorder := serveRequest(t, app, http.MethodDelete, "/v1/users/"+userID, nil)
+
+		assertJSONResponse(t, recorder, http.StatusOK)
+		response := decodeResponse[struct {
+			Message string `json:"message"`
+		}](t, recorder)
+		if response.Message != "user successfully deleted" {
+			t.Errorf("got message %q, expected %q", response.Message, "user successfully deleted")
+		}
+	})
+
+	t.Run("returns not found", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectExec(query).
+			WithArgs(data.UserID(userID)).
+			WillReturnResult(sqlmock.NewResult(0, 0))
+
+		recorder := serveRequest(t, app, http.MethodDelete, "/v1/users/"+userID, nil)
+
+		assertJSONResponse(t, recorder, http.StatusNotFound)
+	})
+
+	t.Run("returns server error", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectExec(query).
+			WithArgs(data.UserID(userID)).
+			WillReturnResult(sqlmock.NewErrorResult(errors.New("delete failed")))
+
+		recorder := serveRequest(t, app, http.MethodDelete, "/v1/users/"+userID, nil)
+
+		assertJSONResponse(t, recorder, http.StatusInternalServerError)
+	})
+}
+
 func TestUsersFilesGetEndpoint(t *testing.T) {
 	const (
 		userID      = "baab6197-3e2d-4969-8492-247bbba900dc"

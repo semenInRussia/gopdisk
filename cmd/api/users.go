@@ -70,6 +70,34 @@ func (app *Application) usersGetHandler(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
+func (app *Application) usersDeleteHandler(w http.ResponseWriter, r *http.Request) {
+	id, err := app.getIdParam(r)
+	if err != nil {
+		app.errorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	err = app.storage.Users.Delete(r.Context(), data.UserID(id))
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrUserNotFound):
+			app.errorResponse(w, err.Error(), http.StatusNotFound)
+		default:
+			app.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+
+	data := Envelope{
+		"message": "user successfully deleted",
+	}
+
+	err = app.writeJSON(w, data, http.StatusOK, nil)
+	if err != nil {
+		app.logError(err)
+	}
+}
+
 func (app *Application) usersFilesGetHandler(w http.ResponseWriter, r *http.Request) {
 	id, err := app.getIdParam(r)
 	if err != nil {
