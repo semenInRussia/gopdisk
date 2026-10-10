@@ -90,7 +90,7 @@ func (s *UserModel) Delete(ctx context.Context, user UserID) error {
 	return nil
 }
 
-func (s *UserModel) GetFiles(ctx context.Context, userID UserID) ([]File, error) {
+func (s *UserModel) GetFilesWithStatus(ctx context.Context, userID UserID, status FileStatus) ([]File, error) {
 	user, err := s.Get(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -102,7 +102,7 @@ func (s *UserModel) GetFiles(ctx context.Context, userID UserID) ([]File, error)
 		WHERE owner_id = $1 AND status = $2
 		ORDER BY name, id`
 
-	args := []any{user.ID, FileStatusReady}
+	args := []any{user.ID, status}
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 
@@ -132,6 +132,14 @@ func (s *UserModel) GetFiles(ctx context.Context, userID UserID) ([]File, error)
 	}
 
 	return files, nil
+}
+
+func (s *UserModel) GetFiles(ctx context.Context, userID UserID) ([]File, error) {
+	return s.GetFilesWithStatus(ctx, userID, FileStatusReady)
+}
+
+func (s *UserModel) GetUploads(ctx context.Context, userID UserID) ([]File, error) {
+	return s.GetFilesWithStatus(ctx, userID, FileStatusUploading)
 }
 
 func ValidateUser(v *validator.Validator, user User) {

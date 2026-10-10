@@ -126,3 +126,32 @@ func (app *Application) usersFilesGetHandler(w http.ResponseWriter, r *http.Requ
 		app.serverErrorResponse(w, err)
 	}
 }
+
+func (app *Application) usersUploadsGetHandler(w http.ResponseWriter, r *http.Request) {
+	id, err := app.getIdParam(r)
+	if err != nil {
+		app.errorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	files, err := app.storage.Users.GetUploads(r.Context(), data.UserID(id))
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrUserNotFound):
+			app.badRequestErrorResponse(w, err)
+		default:
+			app.serverErrorResponse(w, err)
+		}
+		return
+	}
+
+	data := Envelope{
+		"files": files,
+	}
+
+	err = app.writeJSON(w, data, http.StatusOK, nil)
+
+	if err != nil {
+		app.serverErrorResponse(w, err)
+	}
+}
