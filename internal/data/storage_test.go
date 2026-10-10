@@ -488,7 +488,7 @@ func TestListFilesReturnsReadyFilesForOwner(t *testing.T) {
 		t.Fatalf("cannot upload other user file: %v", err)
 	}
 
-	files, err := s.Files.List(context.Background(), owner.ID)
+	files, err := s.Users.GetFiles(context.Background(), owner.ID)
 	if err != nil {
 		t.Fatalf("cannot list files: %v", err)
 	}

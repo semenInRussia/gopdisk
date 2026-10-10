@@ -90,6 +90,50 @@ func (s *UserModel) Delete(ctx context.Context, user UserID) error {
 	return nil
 }
 
+func (s *UserModel) GetFiles(ctx context.Context, userID UserID) ([]File, error) {
+	user, err := s.Get(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	query := `
+		SELECT id, name, filetype, owner_id, status, size
+		FROM files
+		WHERE owner_id = $1 AND status = $2
+		ORDER BY name, id`
+
+	args := []any{user.ID, FileStatusReady}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	files := make([]File, 0)
+
+	for rows.Next() {
+		var file File
+		err := rows.Scan(&file.ID, &file.Name, &file.Filetype, &file.OwnerID, &file.Status, &file.Size)
+
+		if err != nil {
+			return nil, err
+		}
+
+		files = append(files, file)
+	}
+
+	err = rows.Err()
+
+	if err != nil {
+		return nil, err
+	}
+
+	return files, nil
+}
+
 func ValidateUser(v *validator.Validator, user User) {
 	ValidateUserName(v, user.Name)
 }

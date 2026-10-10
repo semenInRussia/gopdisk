@@ -199,6 +199,99 @@ func TestUsersGetEndpoint(t *testing.T) {
 	})
 }
 
+func TestUsersFilesGetEndpoint(t *testing.T) {
+	const (
+		userID      = "baab6197-3e2d-4969-8492-247bbba900dc"
+		firstFileID = "32f11d17-b1f5-4fb0-94ca-614903665dff"
+		lastFileID  = "fb4e2882-0c27-4cf5-b17e-e84fb8a05e5c"
+	)
+	userQuery := regexp.QuoteMeta("SELECT id, name FROM users WHERE id = $1")
+	filesQuery := regexp.QuoteMeta(`
+		SELECT id, name, filetype, owner_id, status, size
+		FROM files
+		WHERE owner_id = $1 AND status = $2
+		ORDER BY name, id`)
+
+	t.Run("returns ready files in order", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectQuery(userQuery).
+			WithArgs(data.UserID(userID)).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).AddRow(userID, "Kotik"))
+		mock.ExpectQuery(filesQuery).
+			WithArgs(data.UserID(userID), data.FileStatusReady).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "filetype", "owner_id", "status", "size"}).
+				AddRow(firstFileID, "alpha.txt", "TXT", userID, data.FileStatusReady, int64(5)).
+				AddRow(lastFileID, "movie.mov", "MOV", userID, data.FileStatusReady, int64(1024)))
+
+		recorder := serveRequest(t, app, http.MethodGet, "/v1/users/"+userID+"/files", nil)
+
+		assertJSONResponse(t, recorder, http.StatusOK)
+		response := decodeResponse[struct {
+			Files []data.File `json:"files"`
+		}](t, recorder)
+		expected := []data.File{
+			{ID: data.FileID(firstFileID), Name: "alpha.txt", Filetype: data.FileKind("TXT"), OwnerID: data.UserID(userID), Status: data.FileStatusReady, Size: 5},
+			{ID: data.FileID(lastFileID), Name: "movie.mov", Filetype: data.FileKind("MOV"), OwnerID: data.UserID(userID), Status: data.FileStatusReady, Size: 1024},
+		}
+		if len(response.Files) != len(expected) {
+			t.Fatalf("got %d files, expected %d", len(response.Files), len(expected))
+		}
+		for i := range expected {
+			if response.Files[i] != expected[i] {
+				t.Errorf("got file %d %+v, expected %+v", i, response.Files[i], expected[i])
+			}
+		}
+	})
+
+	t.Run("returns empty list", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectQuery(userQuery).
+			WithArgs(data.UserID(userID)).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).AddRow(userID, "Kotik"))
+		mock.ExpectQuery(filesQuery).
+			WithArgs(data.UserID(userID), data.FileStatusReady).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "filetype", "owner_id", "status", "size"}))
+
+		recorder := serveRequest(t, app, http.MethodGet, "/v1/users/"+userID+"/files", nil)
+
+		assertJSONResponse(t, recorder, http.StatusOK)
+		response := decodeResponse[struct {
+			Files []data.File `json:"files"`
+		}](t, recorder)
+		if response.Files == nil {
+			t.Fatal("got null files, expected an empty array")
+		}
+		if len(response.Files) != 0 {
+			t.Errorf("got %d files, expected none", len(response.Files))
+		}
+	})
+
+	t.Run("returns bad request for missing user", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectQuery(userQuery).
+			WithArgs(data.UserID(userID)).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "name"}))
+
+		recorder := serveRequest(t, app, http.MethodGet, "/v1/users/"+userID+"/files", nil)
+
+		assertJSONResponse(t, recorder, http.StatusBadRequest)
+	})
+
+	t.Run("returns server error", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectQuery(userQuery).
+			WithArgs(data.UserID(userID)).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).AddRow(userID, "Kotik"))
+		mock.ExpectQuery(filesQuery).
+			WithArgs(data.UserID(userID), data.FileStatusReady).
+			WillReturnError(errors.New("select failed"))
+
+		recorder := serveRequest(t, app, http.MethodGet, "/v1/users/"+userID+"/files", nil)
+
+		assertJSONResponse(t, recorder, http.StatusInternalServerError)
+	})
+}
+
 func TestFilesGetEndpoint(t *testing.T) {
 	const (
 		fileID  = "32f11d17-b1f5-4fb0-94ca-614903665dff"

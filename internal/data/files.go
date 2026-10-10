@@ -267,31 +267,6 @@ func (s *FileModel) Read(ctx context.Context, fileID FileID) (<-chan []byte, <-c
 	return s.bs.ReadBlobsContext(ctx, fileBlobs)
 }
 
-func (s *FileModel) List(ctx context.Context, ownerID UserID) ([]File, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, filetype, owner_id, status, size
-		FROM files WHERE owner_id = $1 AND status = $2 ORDER BY name, id`,
-		ownerID, FileStatusReady)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var files []File
-	for rows.Next() {
-		var file File
-		if err := rows.Scan(&file.ID, &file.Name, &file.Filetype, &file.OwnerID, &file.Status, &file.Size); err != nil {
-			return nil, err
-		}
-		files = append(files, file)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return files, nil
-}
-
 func (s *Storage) IsBelongsToUser(ctx context.Context, fileID FileID, ownerID UserID) (bool, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT EXISTS (SELECT 1 FROM files WHERE id = $1 AND owner_id = $2 AND status = $3)`,
