@@ -16,12 +16,12 @@ func (app *Application) healthCheckHandler(w http.ResponseWriter, r *http.Reques
 	app.writeJSON(w, body, 203, nil)
 }
 
-func (app *Application) routes() *httprouter.Router {
+func (app *Application) routes() http.Handler {
 	router := httprouter.New()
 
 	router.HandlerFunc(http.MethodGet, "/v1/healthcheck", app.healthCheckHandler)
 	router.HandlerFunc(http.MethodPost, "/v1/users", app.usersPostHandler)
 	router.HandlerFunc(http.MethodGet, "/v1/users/:id", app.usersGetHandler)
 
-	return router
+	return app.recoverPanic(router)
 }
