@@ -56,6 +56,11 @@ func (app *Application) errorResponse(w http.ResponseWriter, msg any, status int
 	}
 }
 
+func (app *Application) serverErrorResponse(w http.ResponseWriter, err error) {
+	app.logError(err)
+	app.errorResponse(w, "the server encountered a problem and could not process your request", http.StatusInternalServerError)
+}
+
 func (app *Application) writeValidatorErrors(w http.ResponseWriter, v *validator.Validator) {
 	status := http.StatusUnprocessableEntity
 	if v.IsValid() {
