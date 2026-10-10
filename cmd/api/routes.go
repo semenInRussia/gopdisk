@@ -13,7 +13,7 @@ func (app *Application) healthCheckHandler(w http.ResponseWriter, r *http.Reques
 		"version": version,
 		"time":    time.Now(),
 	}
-	app.writeJSON(w, body, 203, nil)
+	app.writeJSON(w, body, http.StatusNonAuthoritativeInfo, nil)
 }
 
 func (app *Application) routes() http.Handler {
