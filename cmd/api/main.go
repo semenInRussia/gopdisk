@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"gopherdisk/internal/blobs"
@@ -10,6 +11,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
@@ -28,6 +31,48 @@ type Application struct {
 	cfg     Config
 	storage *data.Storage
 	logger  *log.Logger
+}
+
+func (app *Application) serve() error {
+	srv := http.Server{
+		Addr:         fmt.Sprintf(":%d", app.cfg.port),
+		Handler:      app.routes(),
+		IdleTimeout:  time.Minute,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 30 * time.Second,
+	}
+
+	shutdownError := make(chan error)
+
+	go func() {
+		quit := make(chan os.Signal, 1)
+		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+		s := <-quit
+		app.logger.Printf("shutdown server: %s", s.String())
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		shutdownError <- srv.Shutdown(ctx)
+	}()
+
+	app.logger.Printf("starting GoperDisk server on http://127.0.0.1:%d", app.cfg.port)
+	err := srv.ListenAndServe()
+
+	if !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+
+	// wait srv.Shutdown() done
+
+	err = <-shutdownError
+
+	if err == nil {
+		app.logger.Print("stopped server")
+	}
+
+	return err
 }
 
 func main() {
@@ -60,15 +105,9 @@ func main() {
 		storage: storage,
 	}
 
-	srv := http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.port),
-		Handler:      app.routes(),
-		IdleTimeout:  time.Minute,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 30 * time.Second,
-	}
+	err = app.serve()
 
-	logger.Printf("starting GoperDisk server on http://127.0.0.1:%d", cfg.port)
-	err = srv.ListenAndServe()
-	logger.Fatal(err)
+	if err != nil {
+		logger.Fatal(err)
+	}
 }
