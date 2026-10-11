@@ -89,6 +89,30 @@ func (app *Application) filesPatchHandler(w http.ResponseWriter, r *http.Request
 	}
 }
 
+func (app *Application) filesDeleteHandler(w http.ResponseWriter, r *http.Request) {
+	idStr, err := app.getIdParam(r)
+	if err != nil {
+		app.badRequestErrorResponse(w, err.Error())
+		return
+	}
+
+	id := data.FileID(idStr)
+
+	err = app.storage.Files.Delete(r.Context(), id)
+
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrFileNotFound):
+			app.errorResponse(w, err.Error(), http.StatusNotFound)
+		default:
+			app.serverErrorResponse(w, err)
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (app *Application) filesUploadsPostHandler(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		OwnerId  string `json:"owner_id"`

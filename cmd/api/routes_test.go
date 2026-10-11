@@ -70,6 +70,18 @@ func serveFilesUploadsPatchHandler(t *testing.T, app *Application, fileID string
 	return recorder
 }
 
+func serveFilesDeleteHandler(t *testing.T, app *Application, fileID string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodDelete, "/v1/files/"+fileID, nil)
+	params := httprouter.Params{{Key: "id", Value: fileID}}
+	req = req.WithContext(context.WithValue(req.Context(), httprouter.ParamsKey, params))
+	recorder := httptest.NewRecorder()
+	app.filesDeleteHandler(recorder, req)
+
+	return recorder
+}
+
 func decodeResponse[T any](t *testing.T, recorder *httptest.ResponseRecorder) T {
 	t.Helper()
 
@@ -593,6 +605,74 @@ func TestFilesUploadsPatchEndpoint(t *testing.T) {
 			WillReturnError(errors.New("update failed"))
 
 		recorder := serveFilesUploadsPatchHandler(t, app, fileID, body)
+
+		assertJSONResponse(t, recorder, http.StatusInternalServerError)
+	})
+}
+
+func TestFilesDeleteHandler(t *testing.T) {
+	const (
+		fileID  = "32f11d17-b1f5-4fb0-94ca-614903665dff"
+		ownerID = "baab6197-3e2d-4969-8492-247bbba900dc"
+	)
+	selectQuery := regexp.QuoteMeta("SELECT id, name, filetype, owner_id, status, size FROM files WHERE id = $1")
+	deleteQuery := regexp.QuoteMeta("DELETE FROM files WHERE id = $1")
+	fileColumns := []string{"id", "name", "filetype", "owner_id", "status", "size"}
+
+	expectFile := func(mock sqlmock.Sqlmock) {
+		mock.ExpectQuery(selectQuery).
+			WithArgs(data.FileID(fileID)).
+			WillReturnRows(sqlmock.NewRows(fileColumns).
+				AddRow(fileID, "movie.mov", "MOV", ownerID, data.FileStatusReady, int64(1024)))
+	}
+
+	t.Run("deletes logical file", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		expectFile(mock)
+		mock.ExpectExec(deleteQuery).
+			WithArgs(data.FileID(fileID)).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+
+		recorder := serveFilesDeleteHandler(t, app, fileID)
+
+		if recorder.Code != http.StatusNoContent {
+			t.Errorf("got status %d, expected %d; body: %s", recorder.Code, http.StatusNoContent, recorder.Body.String())
+		}
+		if recorder.Body.Len() != 0 {
+			t.Errorf("got response body %q, expected an empty body", recorder.Body.String())
+		}
+	})
+
+	t.Run("returns not found", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectQuery(selectQuery).
+			WithArgs(data.FileID(fileID)).
+			WillReturnRows(sqlmock.NewRows(fileColumns))
+
+		recorder := serveFilesDeleteHandler(t, app, fileID)
+
+		assertJSONResponse(t, recorder, http.StatusNotFound)
+	})
+
+	t.Run("returns server error on lookup failure", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectQuery(selectQuery).
+			WithArgs(data.FileID(fileID)).
+			WillReturnError(errors.New("select failed"))
+
+		recorder := serveFilesDeleteHandler(t, app, fileID)
+
+		assertJSONResponse(t, recorder, http.StatusInternalServerError)
+	})
+
+	t.Run("returns server error on delete failure", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		expectFile(mock)
+		mock.ExpectExec(deleteQuery).
+			WithArgs(data.FileID(fileID)).
+			WillReturnError(errors.New("delete failed"))
+
+		recorder := serveFilesDeleteHandler(t, app, fileID)
 
 		assertJSONResponse(t, recorder, http.StatusInternalServerError)
 	})
