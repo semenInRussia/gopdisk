@@ -10,15 +10,15 @@ import (
 	"strconv"
 )
 
-func (app *Application) filesGetHandler(w http.ResponseWriter, r *http.Request) {
+// get id from request params, find it in DB. Handler errors and return file and occured error (if can).
+func (app *Application) getFileByPathID(w http.ResponseWriter, r *http.Request) (*data.File, error) {
 	idStr, err := app.getIdParam(r)
 	if err != nil {
 		app.errorResponse(w, err.Error(), http.StatusBadRequest)
-		return
+		return nil, err
 	}
 
 	id := data.FileID(idStr)
-
 	file, err := app.storage.Files.Get(r.Context(), id)
 
 	if err != nil {
@@ -28,6 +28,15 @@ func (app *Application) filesGetHandler(w http.ResponseWriter, r *http.Request) 
 		default:
 			app.serverErrorResponse(w, err)
 		}
+		return nil, err
+	}
+
+	return file, nil
+}
+
+func (app *Application) filesGetHandler(w http.ResponseWriter, r *http.Request) {
+	file, err := app.getFileByPathID(w, r)
+	if err != nil {
 		return
 	}
 
@@ -119,7 +128,7 @@ func (app *Application) filesDeleteHandler(w http.ResponseWriter, r *http.Reques
 func (app *Application) filesUploadsPostHandler(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		OwnerId  string `json:"owner_id"`
-		Name     string
+		Name     string `json:"name"`
 		FileType string `json:"file_type"`
 		Size     int64  `json:"size"`
 	}
@@ -151,30 +160,12 @@ func (app *Application) filesUploadsPostHandler(w http.ResponseWriter, r *http.R
 }
 
 func (app *Application) filesContentGetHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Context().Err() != nil {
-		return
-	}
-
-	idStr, err := app.getIdParam(r)
+	file, err := app.getFileByPathID(w, r)
 	if err != nil {
-		app.badRequestErrorResponse(w, err.Error())
 		return
 	}
 
-	id := data.FileID(idStr)
-
-	file, err := app.storage.Files.Get(r.Context(), id)
-	if err != nil {
-		switch {
-		case errors.Is(err, data.ErrFileNotFound):
-			app.errorResponse(w, err.Error(), http.StatusNotFound)
-		default:
-			app.serverErrorResponse(w, err)
-		}
-		return
-	}
-
-	dataCh, errCh := app.storage.Files.Read(r.Context(), id)
+	dataCh, errCh := app.storage.Files.Read(r.Context(), file.ID)
 
 	setFileContentHeaders(w, file)
 
@@ -214,16 +205,11 @@ func (app *Application) filesContentGetHandler(w http.ResponseWriter, r *http.Re
 }
 
 func (app *Application) filesContentHeadHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Context().Err() != nil {
-		return
-	}
-
 	idStr, err := app.getIdParam(r)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-
 	file, err := app.storage.Files.Get(r.Context(), data.FileID(idStr))
 	if err != nil {
 		switch {
