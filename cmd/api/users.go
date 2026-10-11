@@ -14,7 +14,7 @@ func (app *Application) usersPostHandler(w http.ResponseWriter, r *http.Request)
 
 	err := app.readJSON(r, &input)
 	if err != nil {
-		app.errorResponse(w, err.Error(), http.StatusBadRequest)
+		app.badRequestErrorResponse(w, err)
 		return
 	}
 
@@ -28,7 +28,7 @@ func (app *Application) usersPostHandler(w http.ResponseWriter, r *http.Request)
 
 	user, err := app.storage.Users.New(r.Context(), input.Name)
 	if err != nil {
-		app.errorResponse(w, err.Error(), http.StatusBadRequest)
+		app.badRequestErrorResponse(w, err)
 		return
 	}
 
@@ -45,7 +45,7 @@ func (app *Application) usersPostHandler(w http.ResponseWriter, r *http.Request)
 func (app *Application) usersGetHandler(w http.ResponseWriter, r *http.Request) {
 	id, err := app.getIdParam(r)
 	if err != nil {
-		app.errorResponse(w, err.Error(), http.StatusBadRequest)
+		app.badRequestErrorResponse(w, err)
 		return
 	}
 
@@ -73,7 +73,7 @@ func (app *Application) usersGetHandler(w http.ResponseWriter, r *http.Request) 
 func (app *Application) usersDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	id, err := app.getIdParam(r)
 	if err != nil {
-		app.errorResponse(w, err.Error(), http.StatusBadRequest)
+		app.badRequestErrorResponse(w, err)
 		return
 	}
 
@@ -94,7 +94,7 @@ func (app *Application) usersDeleteHandler(w http.ResponseWriter, r *http.Reques
 func (app *Application) usersFilesGetHandler(w http.ResponseWriter, r *http.Request) {
 	id, err := app.getIdParam(r)
 	if err != nil {
-		app.errorResponse(w, err.Error(), http.StatusBadRequest)
+		app.badRequestErrorResponse(w, err)
 		return
 	}
 
@@ -123,7 +123,7 @@ func (app *Application) usersFilesGetHandler(w http.ResponseWriter, r *http.Requ
 func (app *Application) usersUploadsGetHandler(w http.ResponseWriter, r *http.Request) {
 	id, err := app.getIdParam(r)
 	if err != nil {
-		app.errorResponse(w, err.Error(), http.StatusBadRequest)
+		app.badRequestErrorResponse(w, err)
 		return
 	}
 

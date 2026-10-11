@@ -14,7 +14,7 @@ import (
 func (app *Application) getFileByPathID(w http.ResponseWriter, r *http.Request) (*data.File, error) {
 	idStr, err := app.getIdParam(r)
 	if err != nil {
-		app.errorResponse(w, err.Error(), http.StatusBadRequest)
+		app.badRequestErrorResponse(w, err)
 		return nil, err
 	}
 
@@ -55,7 +55,7 @@ func (app *Application) filesGetHandler(w http.ResponseWriter, r *http.Request) 
 func (app *Application) filesPatchHandler(w http.ResponseWriter, r *http.Request) {
 	idStr, err := app.getIdParam(r)
 	if err != nil {
-		app.errorResponse(w, err.Error(), http.StatusBadRequest)
+		app.badRequestErrorResponse(w, err)
 		return
 	}
 
@@ -104,7 +104,7 @@ func (app *Application) filesPatchHandler(w http.ResponseWriter, r *http.Request
 func (app *Application) filesDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	idStr, err := app.getIdParam(r)
 	if err != nil {
-		app.badRequestErrorResponse(w, err.Error())
+		app.badRequestErrorResponse(w, err)
 		return
 	}
 
@@ -136,7 +136,7 @@ func (app *Application) filesUploadsPostHandler(w http.ResponseWriter, r *http.R
 	err := app.readJSON(r, &input)
 
 	if err != nil {
-		app.errorResponse(w, err.Error(), http.StatusBadRequest)
+		app.badRequestErrorResponse(w, err)
 		return
 	}
 
