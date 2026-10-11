@@ -134,7 +134,7 @@ func (bs *BlobStorage) ReadBlobs(blobs []Blob) (<-chan []byte, <-chan error) {
 }
 
 func (bs *BlobStorage) ReadBlobsContext(ctx context.Context, blobs []Blob) (<-chan []byte, <-chan error) {
-	data := make(chan []byte)
+	data := make(chan []byte, 1)
 	errCh := make(chan error, 1)
 
 	go func() {

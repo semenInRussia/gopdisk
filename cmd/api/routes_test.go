@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"regexp"
 	"testing"
 	"time"
@@ -21,6 +22,13 @@ import (
 )
 
 func newTestApplication(t *testing.T) (*Application, sqlmock.Sqlmock) {
+	t.Helper()
+
+	app, mock, _ := newTestApplicationWithStoragePath(t)
+	return app, mock
+}
+
+func newTestApplicationWithStoragePath(t *testing.T) (*Application, sqlmock.Sqlmock, string) {
 	t.Helper()
 
 	db, mock, err := sqlmock.New()
@@ -37,7 +45,8 @@ func newTestApplication(t *testing.T) (*Application, sqlmock.Sqlmock) {
 		}
 	})
 
-	storage, err := data.MakeStorage(t.TempDir(), db)
+	storagePath := t.TempDir()
+	storage, err := data.MakeStorage(storagePath, db)
 	if err != nil {
 		t.Fatalf("cannot create test storage: %v", err)
 	}
@@ -45,7 +54,7 @@ func newTestApplication(t *testing.T) (*Application, sqlmock.Sqlmock) {
 	return &Application{
 		storage: storage,
 		logger:  log.New(io.Discard, "", 0),
-	}, mock
+	}, mock, storagePath
 }
 
 func serveRequest(t *testing.T, app *Application, method, target string, body []byte) *httptest.ResponseRecorder {
@@ -723,5 +732,135 @@ func TestFilesUploadPostEndpoint(t *testing.T) {
 		recorder := serveRequest(t, app, http.MethodPost, "/v1/files/upload", body)
 
 		assertJSONResponse(t, recorder, http.StatusInternalServerError)
+	})
+}
+
+func TestFilesContentGetEndpoint(t *testing.T) {
+	const (
+		fileID  = "32f11d17-b1f5-4fb0-94ca-614903665dff"
+		ownerID = "baab6197-3e2d-4969-8492-247bbba900dc"
+	)
+	selectFileQuery := regexp.QuoteMeta("SELECT id, name, filetype, owner_id, status, size FROM files WHERE id = $1 AND status = $2")
+	selectBlobsQuery := regexp.QuoteMeta(`SELECT b.hash, b.size
+		FROM files f
+		LEFT JOIN file_blobs fb ON fb.file_id = f.id
+		LEFT JOIN blobs b ON b.hash = fb.blob_hash
+		WHERE f.id = $1
+		ORDER BY fb.position`)
+
+	expectReadyFile := func(mock sqlmock.Sqlmock) {
+		mock.ExpectQuery(selectFileQuery).
+			WithArgs(data.FileID(fileID), data.FileStatusReady).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "filetype", "owner_id", "status", "size"}).
+				AddRow(fileID, "file.bin", "BIN", ownerID, data.FileStatusReady, int64(11)))
+	}
+
+	t.Run("streams blobs in order", func(t *testing.T) {
+		app, mock, storagePath := newTestApplicationWithStoragePath(t)
+		expectReadyFile(mock)
+		mock.ExpectQuery(selectBlobsQuery).
+			WithArgs(data.FileID(fileID)).
+			WillReturnRows(sqlmock.NewRows([]string{"hash", "size"}).
+				AddRow("first-blob", int64(6)).
+				AddRow("second-blob", int64(5)))
+		if err := os.WriteFile(storagePath+"/first-blob", []byte("hello "), 0o644); err != nil {
+			t.Fatalf("write first blob: %v", err)
+		}
+		if err := os.WriteFile(storagePath+"/second-blob", []byte("world"), 0o644); err != nil {
+			t.Fatalf("write second blob: %v", err)
+		}
+
+		recorder := serveRequest(t, app, http.MethodGet, "/v1/files/"+fileID+"/content", nil)
+
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("got status %d, expected %d", recorder.Code, http.StatusOK)
+		}
+		if got := recorder.Header().Get("Content-Type"); got != "application/octet-stream" {
+			t.Errorf("got Content-Type %q, expected application/octet-stream", got)
+		}
+		if got := recorder.Body.String(); got != "hello world" {
+			t.Errorf("got body %q, expected %q", got, "hello world")
+		}
+	})
+
+	t.Run("returns an empty ready file", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		expectReadyFile(mock)
+		mock.ExpectQuery(selectBlobsQuery).
+			WithArgs(data.FileID(fileID)).
+			WillReturnRows(sqlmock.NewRows([]string{"hash", "size"}).AddRow(nil, nil))
+
+		recorder := serveRequest(t, app, http.MethodGet, "/v1/files/"+fileID+"/content", nil)
+
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("got status %d, expected %d", recorder.Code, http.StatusOK)
+		}
+		if recorder.Body.Len() != 0 {
+			t.Errorf("got body %q, expected an empty body", recorder.Body.String())
+		}
+	})
+
+	t.Run("returns not found before streaming", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectQuery(selectFileQuery).
+			WithArgs(data.FileID(fileID), data.FileStatusReady).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "filetype", "owner_id", "status", "size"}))
+
+		recorder := serveRequest(t, app, http.MethodGet, "/v1/files/"+fileID+"/content", nil)
+
+		assertJSONResponse(t, recorder, http.StatusNotFound)
+	})
+
+	t.Run("returns server error before streaming", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectQuery(selectFileQuery).
+			WithArgs(data.FileID(fileID), data.FileStatusReady).
+			WillReturnError(errors.New("select failed"))
+
+		recorder := serveRequest(t, app, http.MethodGet, "/v1/files/"+fileID+"/content", nil)
+
+		assertJSONResponse(t, recorder, http.StatusInternalServerError)
+	})
+
+	t.Run("does not write a second response after streaming starts", func(t *testing.T) {
+		app, mock, storagePath := newTestApplicationWithStoragePath(t)
+		var logs bytes.Buffer
+		app.logger = log.New(&logs, "", 0)
+		expectReadyFile(mock)
+		mock.ExpectQuery(selectBlobsQuery).
+			WithArgs(data.FileID(fileID)).
+			WillReturnRows(sqlmock.NewRows([]string{"hash", "size"}).
+				AddRow("first-blob", int64(6)).
+				AddRow("missing-blob", int64(5)))
+		if err := os.WriteFile(storagePath+"/first-blob", []byte("hello "), 0o644); err != nil {
+			t.Fatalf("write first blob: %v", err)
+		}
+
+		recorder := serveRequest(t, app, http.MethodGet, "/v1/files/"+fileID+"/content", nil)
+
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("got status %d, expected committed status %d", recorder.Code, http.StatusOK)
+		}
+		if got := recorder.Body.String(); got != "hello " {
+			t.Errorf("got body %q, expected only the successfully streamed prefix", got)
+		}
+		if logs.Len() == 0 {
+			t.Error("expected the mid-stream read failure to be logged")
+		}
+	})
+
+	t.Run("stops quietly when request is canceled", func(t *testing.T) {
+		app, _ := newTestApplication(t)
+		req := httptest.NewRequest(http.MethodGet, "/v1/files/"+fileID+"/content", nil)
+		ctx, cancel := context.WithCancel(req.Context())
+		cancel()
+		req = req.WithContext(ctx)
+		recorder := httptest.NewRecorder()
+
+		app.routes().ServeHTTP(recorder, req)
+
+		if recorder.Body.Len() != 0 {
+			t.Errorf("got body %q for canceled request, expected none", recorder.Body.String())
+		}
 	})
 }

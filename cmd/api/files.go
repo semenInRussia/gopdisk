@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"gopherdisk/internal/data"
 	"gopherdisk/internal/validator"
+	"io"
 	"net/http"
+	"strconv"
 )
 
 func (app *Application) filesGetHandler(w http.ResponseWriter, r *http.Request) {
@@ -145,4 +148,64 @@ func (app *Application) filesUploadsPostHandler(w http.ResponseWriter, r *http.R
 	data := Envelope{"file": file}
 
 	app.writeJSON(w, data, http.StatusOK, nil)
+}
+
+func (app *Application) filesContentGetHandler(w http.ResponseWriter, r *http.Request) {
+	idStr, err := app.getIdParam(r)
+	if err != nil {
+		app.badRequestErrorResponse(w, err.Error())
+		return
+	}
+
+	id := data.FileID(idStr)
+
+	file, err := app.storage.Files.Get(r.Context(), id)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrFileNotFound):
+			app.errorResponse(w, err.Error(), http.StatusNotFound)
+		default:
+			app.serverErrorResponse(w, err)
+		}
+		return
+	}
+
+	dataCh, errCh := app.storage.Files.Read(r.Context(), id)
+
+	w.Header().Set("Content-Type", string(file.Filetype))
+	w.Header().Set("Content-Length", strconv.FormatInt(file.Size, 10))
+
+	responseStarted := false
+
+	for chunk := range dataCh {
+		responseStarted = true
+		n, writeErr := w.Write(chunk)
+		if writeErr != nil {
+			app.logError(writeErr)
+			return
+		}
+		if n != len(chunk) {
+			app.logError(io.ErrShortWrite)
+			return
+		}
+	}
+
+	for err := range errCh {
+		if err == nil {
+			continue
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return
+		}
+		if responseStarted {
+			app.logError(err)
+			return
+		}
+		if errors.Is(err, data.ErrFileNotFound) {
+			app.errorResponse(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		app.serverErrorResponse(w, err)
+		return
+	}
 }
