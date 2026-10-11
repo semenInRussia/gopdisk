@@ -151,6 +151,10 @@ func (app *Application) filesUploadsPostHandler(w http.ResponseWriter, r *http.R
 }
 
 func (app *Application) filesContentGetHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Context().Err() != nil {
+		return
+	}
+
 	idStr, err := app.getIdParam(r)
 	if err != nil {
 		app.badRequestErrorResponse(w, err.Error())
@@ -172,8 +176,7 @@ func (app *Application) filesContentGetHandler(w http.ResponseWriter, r *http.Re
 
 	dataCh, errCh := app.storage.Files.Read(r.Context(), id)
 
-	w.Header().Set("Content-Type", string(file.Filetype))
-	w.Header().Set("Content-Length", strconv.FormatInt(file.Size, 10))
+	setFileContentHeaders(w, file)
 
 	responseStarted := false
 
@@ -208,4 +211,38 @@ func (app *Application) filesContentGetHandler(w http.ResponseWriter, r *http.Re
 		app.serverErrorResponse(w, err)
 		return
 	}
+}
+
+func (app *Application) filesContentHeadHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Context().Err() != nil {
+		return
+	}
+
+	idStr, err := app.getIdParam(r)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	file, err := app.storage.Files.Get(r.Context(), data.FileID(idStr))
+	if err != nil {
+		switch {
+		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+			return
+		case errors.Is(err, data.ErrFileNotFound):
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			app.logError(err)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+		return
+	}
+
+	setFileContentHeaders(w, file)
+	w.WriteHeader(http.StatusOK)
+}
+
+func setFileContentHeaders(w http.ResponseWriter, file *data.File) {
+	w.Header().Set("Content-Type", string(file.Filetype))
+	w.Header().Set("Content-Length", strconv.FormatInt(file.Size, 10))
 }

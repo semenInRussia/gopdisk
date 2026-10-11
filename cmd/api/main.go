@@ -105,6 +105,42 @@ func main() {
 		storage: storage,
 	}
 
+	go func() {
+		user, err := storage.Users.New(context.Background(), "frametamer")
+		if err != nil {
+			app.logger.Printf("%v", err)
+			return
+		}
+
+		movie, err := os.Open("internal/data/testdata/movie.mov")
+		if err != nil {
+			app.logger.Printf("%v", err)
+			return
+		}
+		defer movie.Close()
+
+		info, err := movie.Stat()
+		if err != nil {
+			app.logger.Printf("%v", err)
+			return
+		}
+
+		file, err := storage.Files.UploadReader(
+			context.Background(),
+			user.ID,
+			info.Name(),
+			data.FileKind("video/quicktime"),
+			movie,
+			info.Size(),
+		)
+		if err != nil {
+			app.logger.Printf("%v", err)
+			return
+		}
+
+		app.logger.Printf("File id: %s\n", file.ID)
+	}()
+
 	err = app.serve()
 
 	if err != nil {

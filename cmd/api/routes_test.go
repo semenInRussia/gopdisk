@@ -752,12 +752,17 @@ func TestFilesContentGetEndpoint(t *testing.T) {
 		mock.ExpectQuery(selectFileQuery).
 			WithArgs(data.FileID(fileID), data.FileStatusReady).
 			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "filetype", "owner_id", "status", "size"}).
-				AddRow(fileID, "file.bin", "BIN", ownerID, data.FileStatusReady, int64(11)))
+				AddRow(fileID, "file.bin", "application/octet-stream", ownerID, data.FileStatusReady, int64(11)))
+	}
+
+	expectReadableFile := func(mock sqlmock.Sqlmock) {
+		expectReadyFile(mock)
+		expectReadyFile(mock)
 	}
 
 	t.Run("streams blobs in order", func(t *testing.T) {
 		app, mock, storagePath := newTestApplicationWithStoragePath(t)
-		expectReadyFile(mock)
+		expectReadableFile(mock)
 		mock.ExpectQuery(selectBlobsQuery).
 			WithArgs(data.FileID(fileID)).
 			WillReturnRows(sqlmock.NewRows([]string{"hash", "size"}).
@@ -778,6 +783,9 @@ func TestFilesContentGetEndpoint(t *testing.T) {
 		if got := recorder.Header().Get("Content-Type"); got != "application/octet-stream" {
 			t.Errorf("got Content-Type %q, expected application/octet-stream", got)
 		}
+		if got := recorder.Header().Get("Content-Length"); got != "11" {
+			t.Errorf("got Content-Length %q, expected 11", got)
+		}
 		if got := recorder.Body.String(); got != "hello world" {
 			t.Errorf("got body %q, expected %q", got, "hello world")
 		}
@@ -785,7 +793,7 @@ func TestFilesContentGetEndpoint(t *testing.T) {
 
 	t.Run("returns an empty ready file", func(t *testing.T) {
 		app, mock := newTestApplication(t)
-		expectReadyFile(mock)
+		expectReadableFile(mock)
 		mock.ExpectQuery(selectBlobsQuery).
 			WithArgs(data.FileID(fileID)).
 			WillReturnRows(sqlmock.NewRows([]string{"hash", "size"}).AddRow(nil, nil))
@@ -826,7 +834,7 @@ func TestFilesContentGetEndpoint(t *testing.T) {
 		app, mock, storagePath := newTestApplicationWithStoragePath(t)
 		var logs bytes.Buffer
 		app.logger = log.New(&logs, "", 0)
-		expectReadyFile(mock)
+		expectReadableFile(mock)
 		mock.ExpectQuery(selectBlobsQuery).
 			WithArgs(data.FileID(fileID)).
 			WillReturnRows(sqlmock.NewRows([]string{"hash", "size"}).
@@ -852,6 +860,120 @@ func TestFilesContentGetEndpoint(t *testing.T) {
 	t.Run("stops quietly when request is canceled", func(t *testing.T) {
 		app, _ := newTestApplication(t)
 		req := httptest.NewRequest(http.MethodGet, "/v1/files/"+fileID+"/content", nil)
+		ctx, cancel := context.WithCancel(req.Context())
+		cancel()
+		req = req.WithContext(ctx)
+		recorder := httptest.NewRecorder()
+
+		app.routes().ServeHTTP(recorder, req)
+
+		if recorder.Body.Len() != 0 {
+			t.Errorf("got body %q for canceled request, expected none", recorder.Body.String())
+		}
+	})
+}
+
+func TestFilesContentHeadEndpoint(t *testing.T) {
+	const (
+		fileID  = "32f11d17-b1f5-4fb0-94ca-614903665dff"
+		ownerID = "baab6197-3e2d-4969-8492-247bbba900dc"
+	)
+	selectFileQuery := regexp.QuoteMeta("SELECT id, name, filetype, owner_id, status, size FROM files WHERE id = $1 AND status = $2")
+	fileColumns := []string{"id", "name", "filetype", "owner_id", "status", "size"}
+
+	t.Run("returns download metadata without reading blobs", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectQuery(selectFileQuery).
+			WithArgs(data.FileID(fileID), data.FileStatusReady).
+			WillReturnRows(sqlmock.NewRows(fileColumns).
+				AddRow(fileID, "movie.mov", "video/quicktime", ownerID, data.FileStatusReady, int64(104857600)))
+
+		recorder := serveRequest(t, app, http.MethodHead, "/v1/files/"+fileID+"/content", nil)
+
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("got status %d, expected %d", recorder.Code, http.StatusOK)
+		}
+		if got := recorder.Header().Get("Content-Type"); got != "video/quicktime" {
+			t.Errorf("got Content-Type %q, expected video/quicktime", got)
+		}
+		if got := recorder.Header().Get("Content-Length"); got != "104857600" {
+			t.Errorf("got Content-Length %q, expected 104857600", got)
+		}
+		if recorder.Body.Len() != 0 {
+			t.Errorf("got body %q, expected an empty body", recorder.Body.String())
+		}
+	})
+
+	t.Run("returns metadata for an empty ready file", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectQuery(selectFileQuery).
+			WithArgs(data.FileID(fileID), data.FileStatusReady).
+			WillReturnRows(sqlmock.NewRows(fileColumns).
+				AddRow(fileID, "empty.bin", "application/octet-stream", ownerID, data.FileStatusReady, int64(0)))
+
+		recorder := serveRequest(t, app, http.MethodHead, "/v1/files/"+fileID+"/content", nil)
+
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("got status %d, expected %d", recorder.Code, http.StatusOK)
+		}
+		if got := recorder.Header().Get("Content-Length"); got != "0" {
+			t.Errorf("got Content-Length %q, expected 0", got)
+		}
+		if recorder.Body.Len() != 0 {
+			t.Errorf("got body %q, expected an empty body", recorder.Body.String())
+		}
+	})
+
+	t.Run("returns not found without a body", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectQuery(selectFileQuery).
+			WithArgs(data.FileID(fileID), data.FileStatusReady).
+			WillReturnRows(sqlmock.NewRows(fileColumns))
+
+		recorder := serveRequest(t, app, http.MethodHead, "/v1/files/"+fileID+"/content", nil)
+
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("got status %d, expected %d", recorder.Code, http.StatusNotFound)
+		}
+		if recorder.Body.Len() != 0 {
+			t.Errorf("got body %q, expected an empty body", recorder.Body.String())
+		}
+	})
+
+	t.Run("returns server error without a body", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectQuery(selectFileQuery).
+			WithArgs(data.FileID(fileID), data.FileStatusReady).
+			WillReturnError(errors.New("select failed"))
+
+		recorder := serveRequest(t, app, http.MethodHead, "/v1/files/"+fileID+"/content", nil)
+
+		if recorder.Code != http.StatusInternalServerError {
+			t.Fatalf("got status %d, expected %d", recorder.Code, http.StatusInternalServerError)
+		}
+		if recorder.Body.Len() != 0 {
+			t.Errorf("got body %q, expected an empty body", recorder.Body.String())
+		}
+	})
+
+	t.Run("returns bad request without a body when id is missing", func(t *testing.T) {
+		app, _ := newTestApplication(t)
+		req := httptest.NewRequest(http.MethodHead, "/v1/files//content", nil)
+		recorder := httptest.NewRecorder()
+
+		app.filesContentHeadHandler(recorder, req)
+
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("got status %d, expected %d", recorder.Code, http.StatusBadRequest)
+		}
+		if recorder.Body.Len() != 0 {
+			t.Errorf("got body %q, expected an empty body", recorder.Body.String())
+		}
+	})
+
+	t.Run("stops quietly when request is canceled", func(t *testing.T) {
+		app, _ := newTestApplication(t)
+		req := httptest.NewRequest(http.MethodHead, "/v1/files/"+fileID+"/content", nil)
 		ctx, cancel := context.WithCancel(req.Context())
 		cancel()
 		req = req.WithContext(ctx)

@@ -33,6 +33,7 @@ func (app *Application) routes() http.Handler {
 	router.HandlerFunc(http.MethodDelete, "/v1/files/:id", app.filesDeleteHandler)
 	router.HandlerFunc(http.MethodPatch, "/v1/files/:id", app.filesPatchHandler)
 	router.HandlerFunc(http.MethodGet, "/v1/files/:id/content", app.filesContentGetHandler)
+	router.HandlerFunc(http.MethodHead, "/v1/files/:id/content", app.filesContentHeadHandler)
 	router.HandlerFunc(http.MethodPost, "/v1/files/upload", app.filesUploadsPostHandler)
 
 	return app.recoverPanic(router)
