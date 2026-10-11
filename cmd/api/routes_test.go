@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
+	"github.com/julienschmidt/httprouter"
 )
 
 func newTestApplication(t *testing.T) (*Application, sqlmock.Sqlmock) {
@@ -52,6 +54,18 @@ func serveRequest(t *testing.T, app *Application, method, target string, body []
 	req := httptest.NewRequest(method, target, bytes.NewReader(body))
 	recorder := httptest.NewRecorder()
 	app.routes().ServeHTTP(recorder, req)
+
+	return recorder
+}
+
+func serveFilesUploadsPatchHandler(t *testing.T, app *Application, fileID string, body []byte) *httptest.ResponseRecorder {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodPatch, "/v1/files/"+fileID, bytes.NewReader(body))
+	params := httprouter.Params{{Key: "id", Value: fileID}}
+	req = req.WithContext(context.WithValue(req.Context(), httprouter.ParamsKey, params))
+	recorder := httptest.NewRecorder()
+	app.filesPatchHandler(recorder, req)
 
 	return recorder
 }
@@ -472,6 +486,113 @@ func TestFilesGetEndpoint(t *testing.T) {
 			WillReturnError(errors.New("select failed"))
 
 		recorder := serveRequest(t, app, http.MethodGet, "/v1/files/"+fileID, nil)
+
+		assertJSONResponse(t, recorder, http.StatusInternalServerError)
+	})
+}
+
+func TestFilesUploadsPatchEndpoint(t *testing.T) {
+	const (
+		fileID  = "32f11d17-b1f5-4fb0-94ca-614903665dff"
+		ownerID = "baab6197-3e2d-4969-8492-247bbba900dc"
+	)
+	selectQuery := regexp.QuoteMeta("SELECT id, name, filetype, owner_id, status, size FROM files WHERE id = $1 AND status = $2")
+	updateQuery := regexp.QuoteMeta("UPDATE files SET name = $1 WHERE id = $2 AND status = $3")
+	body := []byte(`{"name":"holiday.mov"}`)
+	fileColumns := []string{"id", "name", "filetype", "owner_id", "status", "size"}
+
+	expectFile := func(mock sqlmock.Sqlmock) {
+		mock.ExpectQuery(selectQuery).
+			WithArgs(data.FileID(fileID), data.FileStatusReady).
+			WillReturnRows(sqlmock.NewRows(fileColumns).
+				AddRow(fileID, "movie.mov", "MOV", ownerID, data.FileStatusReady, int64(1024)))
+	}
+
+	t.Run("routes documented file path", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		expectFile(mock)
+		mock.ExpectExec(updateQuery).
+			WithArgs("holiday.mov", data.FileID(fileID), data.FileStatusReady).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+
+		recorder := serveRequest(t, app, http.MethodPatch, "/v1/files/"+fileID, body)
+
+		assertJSONResponse(t, recorder, http.StatusOK)
+	})
+
+	t.Run("renames file", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		expectFile(mock)
+		mock.ExpectExec(updateQuery).
+			WithArgs("holiday.mov", data.FileID(fileID), data.FileStatusReady).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+
+		recorder := serveFilesUploadsPatchHandler(t, app, fileID, body)
+
+		assertJSONResponse(t, recorder, http.StatusOK)
+		response := decodeResponse[struct {
+			File data.File `json:"file"`
+		}](t, recorder)
+		if response.File.ID != data.FileID(fileID) {
+			t.Errorf("got file ID %q, expected %q", response.File.ID, fileID)
+		}
+		if response.File.Name != "holiday.mov" {
+			t.Errorf("got file name %q, expected %q", response.File.Name, "holiday.mov")
+		}
+	})
+
+	t.Run("rejects malformed JSON", func(t *testing.T) {
+		app, _ := newTestApplication(t)
+
+		recorder := serveFilesUploadsPatchHandler(t, app, fileID, []byte(`{"name":`))
+
+		assertJSONResponse(t, recorder, http.StatusBadRequest)
+	})
+
+	t.Run("rejects empty name", func(t *testing.T) {
+		app, _ := newTestApplication(t)
+
+		recorder := serveFilesUploadsPatchHandler(t, app, fileID, []byte(`{"name":""}`))
+
+		assertJSONResponse(t, recorder, http.StatusUnprocessableEntity)
+		response := decodeResponse[struct {
+			Error map[string]string `json:"error"`
+		}](t, recorder)
+		if response.Error["user"] != "user's name cannot be empty" {
+			t.Errorf("got validation error %q, expected %q", response.Error["user"], "user's name cannot be empty")
+		}
+	})
+
+	t.Run("returns not found", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectQuery(selectQuery).
+			WithArgs(data.FileID(fileID), data.FileStatusReady).
+			WillReturnRows(sqlmock.NewRows(fileColumns))
+
+		recorder := serveFilesUploadsPatchHandler(t, app, fileID, body)
+
+		assertJSONResponse(t, recorder, http.StatusNotFound)
+	})
+
+	t.Run("returns server error on lookup failure", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectQuery(selectQuery).
+			WithArgs(data.FileID(fileID), data.FileStatusReady).
+			WillReturnError(errors.New("select failed"))
+
+		recorder := serveFilesUploadsPatchHandler(t, app, fileID, body)
+
+		assertJSONResponse(t, recorder, http.StatusInternalServerError)
+	})
+
+	t.Run("returns server error on update failure", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		expectFile(mock)
+		mock.ExpectExec(updateQuery).
+			WithArgs("holiday.mov", data.FileID(fileID), data.FileStatusReady).
+			WillReturnError(errors.New("update failed"))
+
+		recorder := serveFilesUploadsPatchHandler(t, app, fileID, body)
 
 		assertJSONResponse(t, recorder, http.StatusInternalServerError)
 	})

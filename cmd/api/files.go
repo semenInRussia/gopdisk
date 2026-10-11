@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"gopherdisk/internal/data"
+	"gopherdisk/internal/validator"
 	"net/http"
 )
 
@@ -30,6 +31,56 @@ func (app *Application) filesGetHandler(w http.ResponseWriter, r *http.Request) 
 	data := Envelope{
 		"file": file,
 	}
+
+	err = app.writeJSON(w, data, http.StatusOK, nil)
+
+	if err != nil {
+		app.serverErrorResponse(w, err)
+	}
+}
+
+// rename given file
+func (app *Application) filesPatchHandler(w http.ResponseWriter, r *http.Request) {
+	idStr, err := app.getIdParam(r)
+	if err != nil {
+		app.errorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	id := data.FileID(idStr)
+
+	var input struct {
+		Name string
+	}
+
+	err = app.readJSON(r, &input)
+
+	if err != nil {
+		app.badRequestErrorResponse(w, err)
+		return
+	}
+
+	val := validator.New()
+	data.ValidateUserName(val, input.Name)
+
+	if !val.IsValid() {
+		app.writeValidatorErrors(w, val)
+		return
+	}
+
+	file, err := app.storage.Files.Rename(r.Context(), id, input.Name)
+
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrFileNotFound):
+			app.errorResponse(w, err.Error(), http.StatusNotFound)
+		default:
+			app.serverErrorResponse(w, err)
+		}
+		return
+	}
+
+	data := Envelope{"file": file}
 
 	err = app.writeJSON(w, data, http.StatusOK, nil)
 
