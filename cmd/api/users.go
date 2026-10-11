@@ -88,14 +88,7 @@ func (app *Application) usersDeleteHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	data := Envelope{
-		"message": "user successfully deleted",
-	}
-
-	err = app.writeJSON(w, data, http.StatusOK, nil)
-	if err != nil {
-		app.logError(err)
-	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (app *Application) usersFilesGetHandler(w http.ResponseWriter, r *http.Request) {

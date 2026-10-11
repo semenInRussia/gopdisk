@@ -237,12 +237,11 @@ func TestUsersDeleteEndpoint(t *testing.T) {
 
 		recorder := serveRequest(t, app, http.MethodDelete, "/v1/users/"+userID, nil)
 
-		assertJSONResponse(t, recorder, http.StatusOK)
-		response := decodeResponse[struct {
-			Message string `json:"message"`
-		}](t, recorder)
-		if response.Message != "user successfully deleted" {
-			t.Errorf("got message %q, expected %q", response.Message, "user successfully deleted")
+		if recorder.Code != http.StatusNoContent {
+			t.Errorf("got status %d, expected %d; body: %s", recorder.Code, http.StatusNoContent, recorder.Body.String())
+		}
+		if recorder.Body.Len() != 0 {
+			t.Errorf("got response body %q, expected an empty body", recorder.Body.String())
 		}
 	})
 
