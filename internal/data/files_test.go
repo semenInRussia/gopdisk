@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"regexp"
 	"strings"
 	"sync"
 	"testing"
+	"testing/iotest"
 
 	"gopherdisk/internal/blobs"
 
@@ -375,9 +377,11 @@ func TestUploadReaderAndRead(t *testing.T) {
 		name string
 		data string
 	}{
+		{name: "empty", data: ""},
 		{name: "small", data: "abc"},
 		{name: "exact", data: "abcd"},
 		{name: "plus-one", data: "abcde"},
+		{name: "multiple", data: "abcdefghi"},
 	}
 
 	for _, tc := range cases {
@@ -392,6 +396,46 @@ func TestUploadReaderAndRead(t *testing.T) {
 		}
 		if string(got) != tc.data {
 			t.Fatalf("got %q, expected %q", got, tc.data)
+		}
+	}
+}
+
+func TestAddReaderBackReturnsReaderErrors(t *testing.T) {
+	previousMaxPartSize := blobs.BlobsMaxSize
+	blobs.BlobsMaxSize = 4
+	t.Cleanup(func() { blobs.BlobsMaxSize = previousMaxPartSize })
+
+	s := getStorage(t)
+	user, err := s.Users.New(context.Background(), "Reader error user")
+	if err != nil {
+		t.Fatalf("cannot add user: %v", err)
+	}
+	file, err := s.Files.New(context.Background(), user.ID, "reader-error", "TXT", 8)
+	if err != nil {
+		t.Fatalf("cannot create file: %v", err)
+	}
+
+	expectedErr := errors.New("reader failed")
+	reader := io.MultiReader(strings.NewReader("abcd"), iotest.ErrReader(expectedErr))
+	if _, err := s.Files.AddReaderBack(context.Background(), file.ID, reader); !errors.Is(err, expectedErr) {
+		t.Fatalf("AddReaderBack returned %v, expected %v", err, expectedErr)
+	}
+
+	fileBlobs, err := s.Files.GetBlobs(context.Background(), file.ID)
+	if err != nil {
+		t.Fatalf("cannot get file blobs: %v", err)
+	}
+	if len(fileBlobs) != 0 {
+		t.Fatalf("got %d associated blobs after reader error, expected 0", len(fileBlobs))
+	}
+
+	entries, err := os.ReadDir(s.bs.Path)
+	if err != nil {
+		t.Fatalf("cannot inspect blob storage: %v", err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".blob-") {
+			t.Errorf("temporary blob %q was not cleaned up", entry.Name())
 		}
 	}
 }

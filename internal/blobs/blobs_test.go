@@ -3,62 +3,12 @@ package blobs
 import (
 	"bytes"
 	"errors"
-	"io"
 	"os"
 	"strings"
 	"testing"
 	"testing/iotest"
 	"time"
 )
-
-func TestAddDataReaderStoresOrderedChunks(t *testing.T) {
-	previousMaxSize := BlobsMaxSize
-	BlobsMaxSize = 4
-	t.Cleanup(func() { BlobsMaxSize = previousMaxSize })
-
-	tests := []struct {
-		name          string
-		data          []byte
-		expectedSizes []int64
-	}{
-		{name: "empty", data: nil, expectedSizes: []int64{}},
-		{name: "smaller than one blob", data: []byte("abc"), expectedSizes: []int64{3}},
-		{name: "exactly one blob", data: []byte("abcd"), expectedSizes: []int64{4}},
-		{name: "multiple blobs", data: []byte("abcdefghi"), expectedSizes: []int64{4, 4, 1}},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			bs, err := MakeBlobStorage(t.TempDir())
-			if err != nil {
-				t.Fatalf("cannot create blob storage: %v", err)
-			}
-
-			stored, err := bs.AddDataReader(bytes.NewReader(test.data))
-			if err != nil {
-				t.Fatalf("AddDataReader returned error: %v", err)
-			}
-			if len(stored) != len(test.expectedSizes) {
-				t.Fatalf("got %d blobs, expected %d", len(stored), len(test.expectedSizes))
-			}
-
-			var reconstructed []byte
-			for i, blob := range stored {
-				if blob.Size != test.expectedSizes[i] {
-					t.Errorf("blob %d has size %d, expected %d", i, blob.Size, test.expectedSizes[i])
-				}
-				chunk, err := bs.ReadBlob(blob)
-				if err != nil {
-					t.Fatalf("cannot read blob %d: %v", i, err)
-				}
-				reconstructed = append(reconstructed, chunk...)
-			}
-			if !bytes.Equal(reconstructed, test.data) {
-				t.Fatalf("got reconstructed data %q, expected %q", reconstructed, test.data)
-			}
-		})
-	}
-}
 
 func TestAddOneChunkReader(t *testing.T) {
 	previousMaxSize := BlobsMaxSize
@@ -105,7 +55,7 @@ func TestAddOneChunkReader(t *testing.T) {
 	assertNoTemporaryBlobs(t, bs.Path)
 }
 
-func TestAddReaderMethodsReturnReaderErrors(t *testing.T) {
+func TestAddOneChunkReaderReturnsReaderErrors(t *testing.T) {
 	previousMaxSize := BlobsMaxSize
 	BlobsMaxSize = 4
 	t.Cleanup(func() { BlobsMaxSize = previousMaxSize })
@@ -118,10 +68,6 @@ func TestAddReaderMethodsReturnReaderErrors(t *testing.T) {
 
 	if _, err := bs.AddOneChunkReader(iotest.ErrReader(expectedErr)); !errors.Is(err, expectedErr) {
 		t.Fatalf("AddOneChunkReader returned %v, expected %v", err, expectedErr)
-	}
-	reader := io.MultiReader(bytes.NewReader([]byte("abcd")), iotest.ErrReader(expectedErr))
-	if _, err := bs.AddDataReader(reader); !errors.Is(err, expectedErr) {
-		t.Fatalf("AddDataReader returned %v, expected %v", err, expectedErr)
 	}
 	assertNoTemporaryBlobs(t, bs.Path)
 }

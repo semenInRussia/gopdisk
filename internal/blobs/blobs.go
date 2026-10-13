@@ -13,7 +13,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sync"
 )
 
 var BlobsMaxSize int64 = 16 * 1024 * 1024 // 16MB
@@ -34,84 +33,6 @@ func MakeBlobStorage(path string) (*BlobStorage, error) {
 	}
 	err := os.MkdirAll(path, 0755)
 	return &s, err
-}
-
-// write data to correct file on file system, return hash of given data
-func (bs *BlobStorage) AddData(data []byte) ([]Blob, error) {
-	size := int64(len(data))
-	blobs := make([]Blob, ComputeChunksAmount(size))
-
-	i := 0
-	errCh := make(chan error, ComputeChunksAmount(size))
-	var wg sync.WaitGroup
-
-	for arr := range SplitDataOnChunks(data) {
-		wg.Add(1)
-
-		go func(i int) {
-			defer wg.Done()
-			bl, e := bs.AddOneChunk(arr)
-			errCh <- e
-			if e == nil {
-				blobs[i] = *bl
-			}
-		}(i)
-
-		i += 1
-	}
-
-	wg.Wait()
-	close(errCh)
-
-	for err := range errCh {
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return blobs, nil
-}
-
-// AddDataReader reads, splits, and stores all data from reader as ordered blobs.
-func (bs *BlobStorage) AddDataReader(reader io.Reader) ([]Blob, error) {
-	stored := make([]Blob, 0)
-	for {
-		chunk := make([]byte, BlobsMaxSize)
-		size, err := io.ReadFull(reader, chunk)
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
-			return nil, err
-		}
-
-		blob, storeErr := bs.AddOneChunk(chunk[:size])
-		if storeErr != nil {
-			return nil, storeErr
-		}
-		stored = append(stored, *blob)
-		if errors.Is(err, io.ErrUnexpectedEOF) {
-			break
-		}
-	}
-	return stored, nil
-}
-
-func SplitDataOnChunks(data []byte) chan []byte {
-	ch := make(chan []byte)
-
-	go func() {
-		size := int64(len(data))
-		var l int64 = 0
-		for l < size {
-			r := min(l+BlobsMaxSize, size)
-			ch <- data[l:r]
-			l = r
-		}
-		close(ch)
-	}()
-
-	return ch
 }
 
 func (bs *BlobStorage) AddOneChunk(data []byte) (*Blob, error) {
@@ -231,10 +152,6 @@ func (bs *BlobStorage) ReadBlob(blob Blob) ([]byte, error) {
 	}
 
 	return res, nil
-}
-
-func ComputeChunksAmount(size int64) int64 {
-	return (size + BlobsMaxSize - 1) / BlobsMaxSize
 }
 
 // internal
