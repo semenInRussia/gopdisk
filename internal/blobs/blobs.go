@@ -5,6 +5,7 @@ package blobs
 // every blob is a real file in file system that responds on struct File that visible for user
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -71,6 +72,31 @@ func (bs *BlobStorage) AddData(data []byte) ([]Blob, error) {
 	return blobs, nil
 }
 
+// AddDataReader reads, splits, and stores all data from reader as ordered blobs.
+func (bs *BlobStorage) AddDataReader(reader io.Reader) ([]Blob, error) {
+	stored := make([]Blob, 0)
+	for {
+		chunk := make([]byte, BlobsMaxSize)
+		size, err := io.ReadFull(reader, chunk)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, err
+		}
+
+		blob, storeErr := bs.AddOneChunk(chunk[:size])
+		if storeErr != nil {
+			return nil, storeErr
+		}
+		stored = append(stored, *blob)
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			break
+		}
+	}
+	return stored, nil
+}
+
 func SplitDataOnChunks(data []byte) chan []byte {
 	ch := make(chan []byte)
 
@@ -89,13 +115,39 @@ func SplitDataOnChunks(data []byte) chan []byte {
 }
 
 func (bs *BlobStorage) AddOneChunk(data []byte) (*Blob, error) {
-	size := int64(len(data))
+	return bs.AddOneChunkReader(bytes.NewReader(data))
+}
+
+// AddOneChunkReader reads and stores at most one blob from reader.
+func (bs *BlobStorage) AddOneChunkReader(reader io.Reader) (*Blob, error) {
+	temporary, err := os.CreateTemp(bs.Path, ".blob-*")
+	if err != nil {
+		return nil, err
+	}
+	defer temporary.Close()
+	defer os.Remove(temporary.Name())
+
+	hasher := sha256.New()
+	size, err := io.Copy(io.MultiWriter(temporary, hasher), io.LimitReader(reader, BlobsMaxSize+1))
+	if err != nil {
+		return nil, err
+	}
 	if size > BlobsMaxSize {
 		return nil, ErrBlobOverflow
 	}
-	hash := computeHash(data)
-	blob := Blob{Hash: hash, Size: size}
-	return &blob, bs.writeFile(hash, data, 0644)
+	if err := temporary.Chmod(0644); err != nil {
+		return nil, err
+	}
+	if err := temporary.Close(); err != nil {
+		return nil, err
+	}
+
+	hash := fmt.Sprintf("%x", hasher.Sum(nil))
+	if err := os.Rename(temporary.Name(), filepath.Join(bs.Path, hash)); err != nil {
+		return nil, err
+	}
+
+	return &Blob{Hash: hash, Size: size}, nil
 }
 
 func (bs *BlobStorage) DeleteBlob(blob Blob) error {
@@ -192,17 +244,7 @@ func (bs *BlobStorage) openFile(hash string, flag int, perm os.FileMode) (*os.Fi
 	return os.OpenFile(path, flag, perm)
 }
 
-func (bs *BlobStorage) writeFile(hash string, data []byte, perm os.FileMode) error {
-	path := filepath.Join(bs.Path, hash)
-	return os.WriteFile(path, data, perm)
-}
-
 func (bs *BlobStorage) deleteFile(hash string) error {
 	path := filepath.Join(bs.Path, hash)
 	return os.Remove(path)
-}
-
-func computeHash(data []byte) string {
-	hash := fmt.Sprintf("%x", sha256.Sum256(data))
-	return hash
 }
