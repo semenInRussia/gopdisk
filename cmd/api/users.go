@@ -14,7 +14,7 @@ func (app *Application) usersPostHandler(w http.ResponseWriter, r *http.Request)
 
 	err := app.readJSON(w, r, &input)
 	if err != nil {
-		app.badRequestErrorResponse(w, err)
+		app.badRequestErrorResponse(w, err.Error())
 		return
 	}
 
@@ -28,7 +28,7 @@ func (app *Application) usersPostHandler(w http.ResponseWriter, r *http.Request)
 
 	user, err := app.storage.Users.New(r.Context(), input.Name)
 	if err != nil {
-		app.badRequestErrorResponse(w, err)
+		app.badRequestErrorResponse(w, err.Error())
 		return
 	}
 
@@ -45,7 +45,7 @@ func (app *Application) usersPostHandler(w http.ResponseWriter, r *http.Request)
 func (app *Application) usersGetHandler(w http.ResponseWriter, r *http.Request) {
 	id, err := app.getUUIDParam(r, "id")
 	if err != nil {
-		app.badRequestErrorResponse(w, err)
+		app.badRequestErrorResponse(w, err.Error())
 		return
 	}
 
@@ -73,7 +73,7 @@ func (app *Application) usersGetHandler(w http.ResponseWriter, r *http.Request) 
 func (app *Application) usersDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	id, err := app.getUUIDParam(r, "id")
 	if err != nil {
-		app.badRequestErrorResponse(w, err)
+		app.badRequestErrorResponse(w, err.Error())
 		return
 	}
 
@@ -94,7 +94,7 @@ func (app *Application) usersDeleteHandler(w http.ResponseWriter, r *http.Reques
 func (app *Application) usersFilesGetHandler(w http.ResponseWriter, r *http.Request) {
 	id, err := app.getUUIDParam(r, "id")
 	if err != nil {
-		app.badRequestErrorResponse(w, err)
+		app.badRequestErrorResponse(w, err.Error())
 		return
 	}
 
@@ -102,7 +102,7 @@ func (app *Application) usersFilesGetHandler(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrUserNotFound):
-			app.badRequestErrorResponse(w, err)
+			app.badRequestErrorResponse(w, err.Error())
 		default:
 			app.serverErrorResponse(w, err)
 		}
@@ -123,7 +123,7 @@ func (app *Application) usersFilesGetHandler(w http.ResponseWriter, r *http.Requ
 func (app *Application) usersUploadsGetHandler(w http.ResponseWriter, r *http.Request) {
 	id, err := app.getUUIDParam(r, "id")
 	if err != nil {
-		app.badRequestErrorResponse(w, err)
+		app.badRequestErrorResponse(w, err.Error())
 		return
 	}
 
@@ -131,7 +131,7 @@ func (app *Application) usersUploadsGetHandler(w http.ResponseWriter, r *http.Re
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrUserNotFound):
-			app.badRequestErrorResponse(w, err)
+			app.badRequestErrorResponse(w, err.Error())
 		default:
 			app.serverErrorResponse(w, err)
 		}

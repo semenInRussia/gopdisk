@@ -15,7 +15,7 @@ import (
 func (app *Application) getFileByPathID(w http.ResponseWriter, r *http.Request) (*data.File, error) {
 	idStr, err := app.getUUIDParam(r, "id")
 	if err != nil {
-		app.badRequestErrorResponse(w, err)
+		app.badRequestErrorResponse(w, err.Error())
 		return nil, err
 	}
 
@@ -58,7 +58,7 @@ func (app *Application) filesGetHandler(w http.ResponseWriter, r *http.Request) 
 func (app *Application) filesPatchHandler(w http.ResponseWriter, r *http.Request) {
 	idStr, err := app.getUUIDParam(r, "id")
 	if err != nil {
-		app.badRequestErrorResponse(w, err)
+		app.badRequestErrorResponse(w, err.Error())
 		return
 	}
 
@@ -71,7 +71,7 @@ func (app *Application) filesPatchHandler(w http.ResponseWriter, r *http.Request
 	err = app.readJSON(w, r, &input)
 
 	if err != nil {
-		app.badRequestErrorResponse(w, err)
+		app.badRequestErrorResponse(w, err.Error())
 		return
 	}
 
@@ -107,7 +107,7 @@ func (app *Application) filesPatchHandler(w http.ResponseWriter, r *http.Request
 func (app *Application) filesDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	idStr, err := app.getUUIDParam(r, "id")
 	if err != nil {
-		app.badRequestErrorResponse(w, err)
+		app.badRequestErrorResponse(w, err.Error())
 		return
 	}
 
@@ -139,7 +139,7 @@ func (app *Application) filesUploadsPostHandler(w http.ResponseWriter, r *http.R
 	err := app.readJSON(w, r, &input)
 
 	if err != nil {
-		app.badRequestErrorResponse(w, err)
+		app.badRequestErrorResponse(w, err.Error())
 		return
 	}
 
@@ -262,7 +262,7 @@ func setFileContentHeaders(w http.ResponseWriter, file *data.File) {
 func (app *Application) uploadsPartsPutHandler(w http.ResponseWriter, r *http.Request) {
 	fileIDStr, err := app.getUUIDParam(r, "file_id")
 	if err != nil {
-		app.badRequestErrorResponse(w, err)
+		app.badRequestErrorResponse(w, err.Error())
 		return
 	}
 
@@ -270,7 +270,7 @@ func (app *Application) uploadsPartsPutHandler(w http.ResponseWriter, r *http.Re
 
 	pos, err := app.getInt64Param(r, "position")
 	if err != nil {
-		app.badRequestErrorResponse(w, err)
+		app.badRequestErrorResponse(w, err.Error())
 		return
 	}
 
@@ -314,13 +314,13 @@ func (app *Application) uploadsPartsPutHandler(w http.ResponseWriter, r *http.Re
 func (app *Application) uploadsPartsDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	fileID, err := app.getUUIDParam(r, "file_id")
 	if err != nil {
-		app.badRequestErrorResponse(w, err)
+		app.badRequestErrorResponse(w, err.Error())
 		return
 	}
 
 	position, err := app.getInt64Param(r, "position")
 	if err != nil {
-		app.badRequestErrorResponse(w, err)
+		app.badRequestErrorResponse(w, err.Error())
 		return
 	}
 
@@ -343,7 +343,7 @@ func (app *Application) uploadsPartsDeleteHandler(w http.ResponseWriter, r *http
 func (app *Application) uploadsCompletePostHandler(w http.ResponseWriter, r *http.Request) {
 	fileID, err := app.getUUIDParam(r, "file_id")
 	if err != nil {
-		app.badRequestErrorResponse(w, err)
+		app.badRequestErrorResponse(w, err.Error())
 		return
 	}
 
@@ -384,7 +384,7 @@ func (app *Application) uploadsCompletePostHandler(w http.ResponseWriter, r *htt
 func (app *Application) uploadsDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	fileID, err := app.getUUIDParam(r, "file_id")
 	if err != nil {
-		app.badRequestErrorResponse(w, err)
+		app.badRequestErrorResponse(w, err.Error())
 		return
 	}
 
