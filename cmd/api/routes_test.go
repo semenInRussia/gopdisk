@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -14,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"gopherdisk/internal/blobs"
 	"gopherdisk/internal/data"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -834,6 +837,162 @@ func TestFilesUploadGetEndpoint(t *testing.T) {
 			WillReturnError(errors.New("select failed"))
 
 		recorder := serveRequest(t, app, http.MethodGet, "/v1/uploads/"+fileID, nil)
+
+		assertJSONResponse(t, recorder, http.StatusInternalServerError)
+	})
+}
+
+func TestUploadsPartsPutEndpoint(t *testing.T) {
+	const fileID = "32f11d17-b1f5-4fb0-94ca-614903665dff"
+	const position = 2
+
+	getBlobQuery := regexp.QuoteMeta(`
+		SELECT b.hash, b.size
+		FROM files f
+		LEFT JOIN file_blobs fb ON fb.file_id = f.id
+		LEFT JOIN blobs b ON b.hash = fb.blob_hash
+		WHERE f.id = $1 and fb.position = $2
+	`)
+	lockUploadQuery := regexp.QuoteMeta("SELECT TRUE FROM files WHERE id = $1 AND status = $2 FOR UPDATE")
+	saveBlobQuery := regexp.QuoteMeta("INSERT INTO blobs (hash, size) VALUES ($1, $2) ON CONFLICT (hash) DO NOTHING")
+	putBlobQuery := regexp.QuoteMeta(`
+		INSERT INTO file_blobs (file_id, blob_hash, position)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (file_id, position)
+		DO UPDATE SET blob_hash = EXCLUDED.blob_hash`)
+	blobColumns := []string{"hash", "size"}
+
+	expectBlobLookup := func(mock sqlmock.Sqlmock, found bool) {
+		rows := sqlmock.NewRows(blobColumns)
+		if found {
+			rows.AddRow("previous-hash", int64(3))
+		}
+		mock.ExpectQuery(getBlobQuery).
+			WithArgs(data.FileID(fileID), position).
+			WillReturnRows(rows)
+	}
+
+	expectPartStored := func(mock sqlmock.Sqlmock, body []byte) {
+		hash := fmt.Sprintf("%x", sha256.Sum256(body))
+		mock.ExpectBegin()
+		mock.ExpectQuery(lockUploadQuery).
+			WithArgs(data.FileID(fileID), data.FileStatusUploading).
+			WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+		mock.ExpectExec(saveBlobQuery).
+			WithArgs(hash, int64(len(body))).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectExec(putBlobQuery).
+			WithArgs(data.FileID(fileID), hash, position).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectCommit()
+	}
+
+	assertPartResponse := func(t *testing.T, recorder *httptest.ResponseRecorder, status int, size int64) {
+		t.Helper()
+		assertJSONResponse(t, recorder, status)
+		response := decodeResponse[struct {
+			Part data.UploadPart `json:"part"`
+		}](t, recorder)
+		if response.Part.Position != position || response.Part.Size != size {
+			t.Errorf("got part %+v, expected position %d and size %d", response.Part, position, size)
+		}
+	}
+
+	t.Run("creates a new part", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		body := []byte("new part")
+		expectBlobLookup(mock, false)
+		expectPartStored(mock, body)
+
+		recorder := serveRequest(t, app, http.MethodPut, fmt.Sprintf("/v1/uploads/%s/parts/%d", fileID, position), body)
+
+		assertPartResponse(t, recorder, http.StatusCreated, int64(len(body)))
+	})
+
+	t.Run("replaces an existing part", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		body := []byte("replacement")
+		expectBlobLookup(mock, true)
+		expectPartStored(mock, body)
+
+		recorder := serveRequest(t, app, http.MethodPut, fmt.Sprintf("/v1/uploads/%s/parts/%d", fileID, position), body)
+
+		assertPartResponse(t, recorder, http.StatusOK, int64(len(body)))
+	})
+
+	t.Run("rejects an invalid file ID", func(t *testing.T) {
+		app, _ := newTestApplication(t)
+
+		recorder := serveRequest(t, app, http.MethodPut, "/v1/uploads/not-a-uuid/parts/0", []byte("part"))
+
+		assertJSONResponse(t, recorder, http.StatusBadRequest)
+	})
+
+	t.Run("rejects a nonnumeric position", func(t *testing.T) {
+		app, _ := newTestApplication(t)
+
+		recorder := serveRequest(t, app, http.MethodPut, "/v1/uploads/"+fileID+"/parts/not-a-number", []byte("part"))
+
+		assertJSONResponse(t, recorder, http.StatusBadRequest)
+	})
+
+	t.Run("rejects a negative position", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectQuery(getBlobQuery).
+			WithArgs(data.FileID(fileID), -1).
+			WillReturnRows(sqlmock.NewRows(blobColumns))
+
+		recorder := serveRequest(t, app, http.MethodPut, "/v1/uploads/"+fileID+"/parts/-1", []byte("part"))
+
+		assertJSONResponse(t, recorder, http.StatusBadRequest)
+	})
+
+	t.Run("rejects an oversized part", func(t *testing.T) {
+		previousMaxPartSize := blobs.BlobsMaxSize
+		blobs.BlobsMaxSize = 4
+		t.Cleanup(func() { blobs.BlobsMaxSize = previousMaxPartSize })
+
+		app, mock, storagePath := newTestApplicationWithStoragePath(t)
+		expectBlobLookup(mock, false)
+
+		recorder := serveRequest(t, app, http.MethodPut, fmt.Sprintf("/v1/uploads/%s/parts/%d", fileID, position), []byte("12345"))
+
+		assertJSONResponse(t, recorder, http.StatusBadRequest)
+		entries, err := os.ReadDir(storagePath)
+		if err != nil {
+			t.Fatalf("cannot read test blob directory: %v", err)
+		}
+		if len(entries) != 0 {
+			t.Errorf("got %d stored files after rejected upload, expected none", len(entries))
+		}
+	})
+
+	t.Run("returns not found for a missing or completed upload", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		expectBlobLookup(mock, false)
+		mock.ExpectBegin()
+		mock.ExpectQuery(lockUploadQuery).
+			WithArgs(data.FileID(fileID), data.FileStatusUploading).
+			WillReturnRows(sqlmock.NewRows([]string{"exists"}))
+		mock.ExpectRollback()
+
+		recorder := serveRequest(t, app, http.MethodPut, fmt.Sprintf("/v1/uploads/%s/parts/%d", fileID, position), []byte("part"))
+
+		assertJSONResponse(t, recorder, http.StatusNotFound)
+		response := decodeResponse[struct {
+			Error string `json:"error"`
+		}](t, recorder)
+		if response.Error != data.ErrFileNotFound.Error() {
+			t.Errorf("got error %q, expected %q", response.Error, data.ErrFileNotFound.Error())
+		}
+	})
+
+	t.Run("returns server error when storing metadata fails", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		expectBlobLookup(mock, false)
+		mock.ExpectBegin().WillReturnError(errors.New("begin failed"))
+
+		recorder := serveRequest(t, app, http.MethodPut, fmt.Sprintf("/v1/uploads/%s/parts/%d", fileID, position), []byte("part"))
 
 		assertJSONResponse(t, recorder, http.StatusInternalServerError)
 	})
