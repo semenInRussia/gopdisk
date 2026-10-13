@@ -11,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -305,7 +306,7 @@ func TestNewAddDataCommitAndRead(t *testing.T) {
 		t.Fatalf("new file already has %d blobs", len(fileBlobs))
 	}
 	for i, part := range [][]byte{[]byte("hel"), []byte("lo-world")} {
-		if _, err := s.Files.AddData(context.Background(), file.ID, part); err != nil {
+		if _, err := s.Files.AddDataBack(context.Background(), file.ID, part); err != nil {
 			t.Fatalf("cannot add data %d: %v", i, err)
 		}
 	}
@@ -348,13 +349,13 @@ func TestCommitRequiresDeclaredSize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot create file: %v", err)
 	}
-	if _, err := s.Files.AddData(context.Background(), file.ID, []byte("four")); err != nil {
+	if _, err := s.Files.AddDataBack(context.Background(), file.ID, []byte("four")); err != nil {
 		t.Fatalf("cannot add data: %v", err)
 	}
 	if err := s.Files.Commit(context.Background(), file.ID); !errors.Is(err, ErrEarlyCommit) {
 		t.Fatalf("got error %v, expected %v", err, ErrEarlyCommit)
 	}
-	if _, err := s.Files.AddData(context.Background(), file.ID, []byte("!")); err != nil {
+	if _, err := s.Files.AddDataBack(context.Background(), file.ID, []byte("!")); err != nil {
 		t.Fatalf("cannot add remaining data: %v", err)
 	}
 	if err := s.Files.Commit(context.Background(), file.ID); err != nil {
@@ -415,7 +416,7 @@ func TestAddReaderAndAddBlob(t *testing.T) {
 		t.Fatalf("cannot create file: %v", err)
 	}
 
-	readerBlobs, err := s.Files.AddReader(context.Background(), file.ID, strings.NewReader("abcde"))
+	readerBlobs, err := s.Files.AddReaderBack(context.Background(), file.ID, strings.NewReader("abcde"))
 	if err != nil {
 		t.Fatalf("cannot add reader: %v", err)
 	}
@@ -426,7 +427,7 @@ func TestAddReaderAndAddBlob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot store standalone blob: %v", err)
 	}
-	if err := s.Files.AddBlob(context.Background(), file.ID, *lastBlob); err != nil {
+	if err := s.Files.AddBlobBack(context.Background(), file.ID, *lastBlob); err != nil {
 		t.Fatalf("cannot append blob: %v", err)
 	}
 	if err := s.Files.Commit(context.Background(), file.ID); err != nil {
@@ -439,6 +440,147 @@ func TestAddReaderAndAddBlob(t *testing.T) {
 	}
 	if string(got) != "abcdefg" {
 		t.Fatalf("got %q, expected %q", got, "abcdefg")
+	}
+}
+
+func TestPositionedAddsReplaceAndPreserveOrder(t *testing.T) {
+	previousMaxPartSize := blobs.BlobsMaxSize
+	blobs.BlobsMaxSize = 4
+	t.Cleanup(func() { blobs.BlobsMaxSize = previousMaxPartSize })
+
+	s := getStorage(t)
+	user, err := s.Users.New(context.Background(), "Positioned upload user")
+	if err != nil {
+		t.Fatalf("cannot add user: %v", err)
+	}
+	file, err := s.Files.New(context.Background(), user.ID, "positioned", "TXT", int64(len("aaBBccdd")))
+	if err != nil {
+		t.Fatalf("cannot create file: %v", err)
+	}
+
+	if _, err := s.Files.AddData(context.Background(), file.ID, 2, []byte("cc")); err != nil {
+		t.Fatalf("cannot add data at position 2: %v", err)
+	}
+	if _, err := s.Files.AddReader(context.Background(), file.ID, 0, strings.NewReader("aa")); err != nil {
+		t.Fatalf("cannot add reader at position 0: %v", err)
+	}
+	if _, err := s.Files.AddDataBack(context.Background(), file.ID, []byte("dd")); err != nil {
+		t.Fatalf("cannot append data after a position gap: %v", err)
+	}
+	positionOne, err := s.bs.AddOneChunk([]byte("bb"))
+	if err != nil {
+		t.Fatalf("cannot store standalone blob: %v", err)
+	}
+	if err := s.Files.AddBlob(context.Background(), file.ID, 1, *positionOne); err != nil {
+		t.Fatalf("cannot add blob at position 1: %v", err)
+	}
+	if _, err := s.Files.AddData(context.Background(), file.ID, 1, []byte("BB")); err != nil {
+		t.Fatalf("cannot replace position 1: %v", err)
+	}
+
+	fileBlobs, err := s.Files.GetBlobs(context.Background(), file.ID)
+	if err != nil {
+		t.Fatalf("cannot get file blobs: %v", err)
+	}
+	if len(fileBlobs) != 4 {
+		t.Fatalf("got %d blobs, expected 4", len(fileBlobs))
+	}
+	if err := s.Files.Commit(context.Background(), file.ID); err != nil {
+		t.Fatalf("cannot commit file: %v", err)
+	}
+	got, err := readAll(t, s, file.ID)
+	if err != nil {
+		t.Fatalf("cannot read file: %v", err)
+	}
+	if string(got) != "aaBBccdd" {
+		t.Fatalf("got %q, expected %q", got, "aaBBccdd")
+	}
+}
+
+func TestPositionedAddsValidatePositionAndSize(t *testing.T) {
+	previousMaxPartSize := blobs.BlobsMaxSize
+	blobs.BlobsMaxSize = 4
+	t.Cleanup(func() { blobs.BlobsMaxSize = previousMaxPartSize })
+
+	s := getStorage(t)
+	user, err := s.Users.New(context.Background(), "Position validation user")
+	if err != nil {
+		t.Fatalf("cannot add user: %v", err)
+	}
+	file, err := s.Files.New(context.Background(), user.ID, "validation", "TXT", 0)
+	if err != nil {
+		t.Fatalf("cannot create file: %v", err)
+	}
+	blob, err := s.bs.AddOneChunk([]byte("data"))
+	if err != nil {
+		t.Fatalf("cannot store standalone blob: %v", err)
+	}
+
+	if _, err := s.Files.AddData(context.Background(), file.ID, -1, nil); !errors.Is(err, ErrInvalidPosition) {
+		t.Fatalf("AddData returned %v, expected %v", err, ErrInvalidPosition)
+	}
+	if _, err := s.Files.AddReader(context.Background(), file.ID, -1, strings.NewReader("")); !errors.Is(err, ErrInvalidPosition) {
+		t.Fatalf("AddReader returned %v, expected %v", err, ErrInvalidPosition)
+	}
+	if err := s.Files.AddBlob(context.Background(), file.ID, -1, *blob); !errors.Is(err, ErrInvalidPosition) {
+		t.Fatalf("AddBlob returned %v, expected %v", err, ErrInvalidPosition)
+	}
+	if _, err := s.Files.AddData(context.Background(), file.ID, 0, []byte("12345")); !errors.Is(err, blobs.ErrBlobOverflow) {
+		t.Fatalf("oversized AddData returned %v, expected %v", err, blobs.ErrBlobOverflow)
+	}
+	if _, err := s.Files.AddReader(context.Background(), file.ID, 0, strings.NewReader("12345")); !errors.Is(err, blobs.ErrBlobOverflow) {
+		t.Fatalf("oversized AddReader returned %v, expected %v", err, blobs.ErrBlobOverflow)
+	}
+
+	fileBlobs, err := s.Files.GetBlobs(context.Background(), file.ID)
+	if err != nil {
+		t.Fatalf("cannot get file blobs: %v", err)
+	}
+	if len(fileBlobs) != 0 {
+		t.Fatalf("got %d blobs after rejected writes, expected 0", len(fileBlobs))
+	}
+}
+
+func TestPositionedAddsCanRunConcurrently(t *testing.T) {
+	s := getStorage(t)
+	user, err := s.Users.New(context.Background(), "Concurrent positioned upload user")
+	if err != nil {
+		t.Fatalf("cannot add user: %v", err)
+	}
+
+	const parts = 8
+	file, err := s.Files.New(context.Background(), user.ID, "concurrent", "TXT", parts)
+	if err != nil {
+		t.Fatalf("cannot create file: %v", err)
+	}
+
+	errCh := make(chan error, parts)
+	var wg sync.WaitGroup
+	for position := 0; position < parts; position++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := s.Files.AddData(context.Background(), file.ID, position, []byte{byte('a' + position)})
+			errCh <- err
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("concurrent positioned add failed: %v", err)
+		}
+	}
+
+	if err := s.Files.Commit(context.Background(), file.ID); err != nil {
+		t.Fatalf("cannot commit concurrent upload: %v", err)
+	}
+	got, err := readAll(t, s, file.ID)
+	if err != nil {
+		t.Fatalf("cannot read concurrent upload: %v", err)
+	}
+	if string(got) != "abcdefgh" {
+		t.Fatalf("got %q, expected %q", got, "abcdefgh")
 	}
 }
 
@@ -634,9 +776,17 @@ func TestAddDataRejectsCommittedFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot upload file: %v", err)
 	}
-	_, err = s.Files.AddData(context.Background(), file.ID, []byte("extra"))
+	_, err = s.Files.AddDataBack(context.Background(), file.ID, []byte("extra"))
 	if !errors.Is(err, ErrFileNotFound) {
-		t.Fatalf("got error %v, expected %v", err, ErrFileNotFound)
+		t.Fatalf("AddDataBack returned %v, expected %v", err, ErrFileNotFound)
+	}
+	_, err = s.Files.AddData(context.Background(), file.ID, 0, []byte("replacement"))
+	if !errors.Is(err, ErrFileNotFound) {
+		t.Fatalf("positioned AddData returned %v, expected %v", err, ErrFileNotFound)
+	}
+	_, err = s.Files.AddData(context.Background(), GenerateFileID(), 0, []byte("missing"))
+	if !errors.Is(err, ErrFileNotFound) {
+		t.Fatalf("AddData for missing file returned %v, expected %v", err, ErrFileNotFound)
 	}
 	loaded, err := s.Files.Get(context.Background(), file.ID)
 	if err != nil {

@@ -17,9 +17,10 @@ type FileStatus string
 type FileKind string
 
 var (
-	ErrFileNotFound = errors.New("cannot find a file")
-	ErrInvalidSize  = errors.New("size must not be negative")
-	ErrEarlyCommit  = errors.New("cannot commit file before all data is added")
+	ErrFileNotFound    = errors.New("cannot find a file")
+	ErrInvalidSize     = errors.New("size must not be negative")
+	ErrInvalidPosition = errors.New("position must not be negative")
+	ErrEarlyCommit     = errors.New("cannot commit file before all data is added")
 )
 
 const (
@@ -192,13 +193,13 @@ func (s *FileModel) GetBlobs(ctx context.Context, fileID FileID) ([]blobs.Blob, 
 	return fileBlobs, nil
 }
 
-// UploadData is a shortcut for New, AddData, and Commit.
+// UploadData is a shortcut for New, AddDataBack, and Commit.
 func (s *FileModel) UploadData(ctx context.Context, ownerID UserID, name string, fileType FileKind, data []byte) (*File, error) {
 	file, err := s.New(ctx, ownerID, name, fileType, int64(len(data)))
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.AddData(ctx, file.ID, data); err != nil {
+	if _, err := s.AddDataBack(ctx, file.ID, data); err != nil {
 		_ = s.Delete(context.WithoutCancel(ctx), file.ID)
 		return nil, err
 	}
@@ -209,13 +210,13 @@ func (s *FileModel) UploadData(ctx context.Context, ownerID UserID, name string,
 	return s.Get(ctx, file.ID)
 }
 
-// UploadReader is a shortcut for New, AddReader, and Commit.
+// UploadReader is a shortcut for New, AddReaderBack, and Commit.
 func (s *FileModel) UploadReader(ctx context.Context, ownerID UserID, name string, fileType FileKind, reader io.Reader, size int64) (*File, error) {
 	file, err := s.New(ctx, ownerID, name, fileType, size)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.AddReader(ctx, file.ID, reader); err != nil {
+	if _, err := s.AddReaderBack(ctx, file.ID, reader); err != nil {
 		_ = s.Delete(context.WithoutCancel(ctx), file.ID)
 		return nil, err
 	}
@@ -226,8 +227,8 @@ func (s *FileModel) UploadReader(ctx context.Context, ownerID UserID, name strin
 	return s.Get(ctx, file.ID)
 }
 
-// AddData stores data as one independent sequence of blobs and appends it to file.
-func (s *FileModel) AddData(ctx context.Context, fileID FileID, data []byte) ([]blobs.Blob, error) {
+// AddDataBack stores data as one independent sequence of blobs and appends it to file.
+func (s *FileModel) AddDataBack(ctx context.Context, fileID FileID, data []byte) ([]blobs.Blob, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -241,8 +242,8 @@ func (s *FileModel) AddData(ctx context.Context, fileID FileID, data []byte) ([]
 	return stored, nil
 }
 
-// AddReader stores reader contents as one independent sequence of blobs and appends it to file.
-func (s *FileModel) AddReader(ctx context.Context, fileID FileID, reader io.Reader) ([]blobs.Blob, error) {
+// AddReaderBack stores reader contents as one independent sequence of blobs and appends it to file.
+func (s *FileModel) AddReaderBack(ctx context.Context, fileID FileID, reader io.Reader) ([]blobs.Blob, error) {
 	stored, err := s.readAndStoreBlobs(ctx, reader)
 	if err != nil {
 		return nil, err
@@ -253,9 +254,55 @@ func (s *FileModel) AddReader(ctx context.Context, fileID FileID, reader io.Read
 	return stored, nil
 }
 
-// AddBlob appends metadata for an already stored physical blob to file.
-func (s *FileModel) AddBlob(ctx context.Context, fileID FileID, blob blobs.Blob) error {
+// AddBlobBack appends metadata for an already stored physical blob to file.
+func (s *FileModel) AddBlobBack(ctx context.Context, fileID FileID, blob blobs.Blob) error {
 	return s.appendBlobs(ctx, fileID, []blobs.Blob{blob})
+}
+
+// AddData stores data as one blob at position, replacing any blob already there.
+func (s *FileModel) AddData(ctx context.Context, fileID FileID, position int, data []byte) (*blobs.Blob, error) {
+	if position < 0 {
+		return nil, ErrInvalidPosition
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	stored, err := s.bs.AddOneChunk(data)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.putBlob(ctx, fileID, position, *stored); err != nil {
+		return nil, err
+	}
+	return stored, nil
+}
+
+// AddReader stores reader contents as one blob at position, replacing any blob already there.
+func (s *FileModel) AddReader(ctx context.Context, fileID FileID, position int, reader io.Reader) (*blobs.Blob, error) {
+	if position < 0 {
+		return nil, ErrInvalidPosition
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	data, err := io.ReadAll(io.LimitReader(reader, blobs.BlobsMaxSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return s.AddData(ctx, fileID, position, data)
+}
+
+// AddBlob associates an already stored physical blob with position, replacing any blob already there.
+func (s *FileModel) AddBlob(ctx context.Context, fileID FileID, position int, blob blobs.Blob) error {
+	if position < 0 {
+		return ErrInvalidPosition
+	}
+	return s.putBlob(ctx, fileID, position, blob)
 }
 
 // Commit makes an uploading file visible to regular read and list operations.
@@ -396,7 +443,7 @@ func (s *FileModel) appendBlobs(ctx context.Context, fileID FileID, appended []b
 
 	var position int
 	if err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM file_blobs WHERE file_id = $1`, fileID).Scan(&position); err != nil {
+		`SELECT COALESCE(MAX(position), -1) + 1 FROM file_blobs WHERE file_id = $1`, fileID).Scan(&position); err != nil {
 		return err
 	}
 
@@ -411,6 +458,40 @@ func (s *FileModel) appendBlobs(ctx context.Context, fileID FileID, appended []b
 			return err
 		}
 		position++
+	}
+	return tx.Commit()
+}
+
+func (s *FileModel) putBlob(ctx context.Context, fileID FileID, position int, blob blobs.Blob) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var exists bool
+	if err := tx.QueryRowContext(ctx,
+		`SELECT TRUE FROM files WHERE id = $1 AND status = $2 FOR UPDATE`,
+		fileID, FileStatusUploading).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrFileNotFound
+		}
+		return err
+	}
+
+	if err := saveBlob(ctx, tx, blob); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO file_blobs (file_id, blob_hash, position)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (file_id, position)
+		DO UPDATE SET blob_hash = EXCLUDED.blob_hash`, fileID, blob.Hash, position)
+	if err != nil {
+		return err
 	}
 	return tx.Commit()
 }
