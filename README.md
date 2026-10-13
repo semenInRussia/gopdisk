@@ -40,8 +40,98 @@ GOPHERDISK_DATABASE_TEST_URL='postgres://gopherdisk:gopherdisk@localhost:5432/go
 
 ## Run Project
 
-The project currently exposes the migration command:
+Run the migrations, then start the HTTP API on `http://127.0.0.1:8080`:
 
 ```bash
 go run ./cmd/migrate up
+go run ./cmd/api
+```
+
+## EXAMPLE: Upload an 80 MiB File Through the API
+
+Suppose you have an 80 MiB video named `holiday.mov`. The API accepts parts of
+up to 16 MiB, so you need to send the file in five parts. The commands below
+assume that the API is running on `http://127.0.0.1:8080`.
+
+First, check the size of your file:
+
+```bash
+wc -c < holiday.mov
+```
+
+For an 80 MiB file, the result is `83886080` bytes.
+
+Create the user who will own the file:
+
+```bash
+curl -X POST http://127.0.0.1:8080/v1/users \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Alice"}'
+```
+
+The response contains the new user ID:
+
+```json
+{
+    "user": {
+        "id": "baab6197-3e2d-4969-8492-247bbba900dc",
+        "name": "Alice"
+    }
+}
+```
+
+Use that ID to start the upload. The `size` value is the size of the complete
+file in bytes, not the size of one part:
+
+```bash
+curl -X POST http://127.0.0.1:8080/v1/files/upload \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "owner_id": "baab6197-3e2d-4969-8492-247bbba900dc",
+    "name": "holiday.mov",
+    "type": "video/quicktime",
+    "size": 83886080
+  }'
+```
+
+Copy the file ID from the response. In the commands below, the example file ID
+is `32f11d17-b1f5-4fb0-94ca-614903665dff`.
+
+Upload the five parts. Positions start at zero. Each `dd` command reads one
+16 MiB part from the original file and sends it directly to the API:
+
+```bash
+dd if=holiday.mov bs=16777216 skip=0 count=1 2>/dev/null | \
+  curl -X PUT http://127.0.0.1:8080/v1/uploads/32f11d17-b1f5-4fb0-94ca-614903665dff/parts/0 \
+    -H 'Content-Type: application/octet-stream' --data-binary @-
+
+dd if=holiday.mov bs=16777216 skip=1 count=1 2>/dev/null | \
+  curl -X PUT http://127.0.0.1:8080/v1/uploads/32f11d17-b1f5-4fb0-94ca-614903665dff/parts/1 \
+    -H 'Content-Type: application/octet-stream' --data-binary @-
+
+dd if=holiday.mov bs=16777216 skip=2 count=1 2>/dev/null | \
+  curl -X PUT http://127.0.0.1:8080/v1/uploads/32f11d17-b1f5-4fb0-94ca-614903665dff/parts/2 \
+    -H 'Content-Type: application/octet-stream' --data-binary @-
+
+dd if=holiday.mov bs=16777216 skip=3 count=1 2>/dev/null | \
+  curl -X PUT http://127.0.0.1:8080/v1/uploads/32f11d17-b1f5-4fb0-94ca-614903665dff/parts/3 \
+    -H 'Content-Type: application/octet-stream' --data-binary @-
+
+dd if=holiday.mov bs=16777216 skip=4 count=1 2>/dev/null | \
+  curl -X PUT http://127.0.0.1:8080/v1/uploads/32f11d17-b1f5-4fb0-94ca-614903665dff/parts/4 \
+    -H 'Content-Type: application/octet-stream' --data-binary @-
+```
+
+After all five requests succeed, complete the upload:
+
+```bash
+curl -X POST \
+  http://127.0.0.1:8080/v1/uploads/32f11d17-b1f5-4fb0-94ca-614903665dff/complete
+```
+
+The returned file should have the status `ready`. You can now download it:
+
+```bash
+curl -o downloaded-holiday.mov \
+  http://127.0.0.1:8080/v1/files/32f11d17-b1f5-4fb0-94ca-614903665dff/content
 ```
