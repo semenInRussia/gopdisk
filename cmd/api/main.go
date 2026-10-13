@@ -129,7 +129,7 @@ func main() {
 			context.Background(),
 			user.ID,
 			info.Name(),
-			data.FileKind("video/quicktime"),
+			data.FileType("video/quicktime"),
 			movie,
 			info.Size(),
 		)

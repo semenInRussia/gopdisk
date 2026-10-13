@@ -73,7 +73,7 @@ func TestFileModelGetUpload(t *testing.T) {
 		if upload.FileID != fileID || upload.OwnerID != ownerID {
 			t.Errorf("got IDs %q/%q, expected %q/%q", upload.FileID, upload.OwnerID, fileID, ownerID)
 		}
-		if upload.Name != "movie.mov" || upload.FileType != FileKind("video/quicktime") {
+		if upload.Name != "movie.mov" || upload.Type != FileType("video/quicktime") {
 			t.Errorf("got metadata %+v, expected movie.mov and video/quicktime", upload)
 		}
 		if upload.Status != FileStatusUploading || upload.Size != 40 || upload.ReceivedSize != 40 {
@@ -185,7 +185,7 @@ func TestInsertFilePersistsConstructedFile(t *testing.T) {
 		t.Fatalf("cannot add user Kotik: %v", err)
 	}
 	file := File{
-		ID: GenerateFileID(), Name: "Empty", Filetype: "TXT", OwnerID: kotik.ID,
+		ID: GenerateFileID(), Name: "Empty", Type: "TXT", OwnerID: kotik.ID,
 		Status: FileStatusReady, Size: 0,
 	}
 	if err := s.Files.InsertWithStatus(context.Background(), &file); err != nil {
@@ -219,7 +219,7 @@ func TestInsertRejectsNegativeSize(t *testing.T) {
 		t.Fatalf("cannot add user Kotik: %v", err)
 	}
 	err = s.Files.InsertWithStatus(context.Background(), &File{
-		ID: GenerateFileID(), Name: "Invalid", Filetype: "TXT", OwnerID: kotik.ID,
+		ID: GenerateFileID(), Name: "Invalid", Type: "TXT", OwnerID: kotik.ID,
 		Status: FileStatusUploading, Size: -1,
 	})
 	if !errors.Is(err, ErrInvalidSize) {

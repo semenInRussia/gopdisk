@@ -311,8 +311,8 @@ func TestUsersFilesGetEndpoint(t *testing.T) {
 			Files []data.File `json:"files"`
 		}](t, recorder)
 		expected := []data.File{
-			{ID: data.FileID(firstFileID), Name: "alpha.txt", Filetype: data.FileKind("TXT"), OwnerID: data.UserID(userID), Status: data.FileStatusReady, Size: 5},
-			{ID: data.FileID(lastFileID), Name: "movie.mov", Filetype: data.FileKind("MOV"), OwnerID: data.UserID(userID), Status: data.FileStatusReady, Size: 1024},
+			{ID: data.FileID(firstFileID), Name: "alpha.txt", Type: data.FileType("TXT"), OwnerID: data.UserID(userID), Status: data.FileStatusReady, Size: 5},
+			{ID: data.FileID(lastFileID), Name: "movie.mov", Type: data.FileType("MOV"), OwnerID: data.UserID(userID), Status: data.FileStatusReady, Size: 1024},
 		}
 		if len(response.Files) != len(expected) {
 			t.Fatalf("got %d files, expected %d", len(response.Files), len(expected))
@@ -404,8 +404,8 @@ func TestUsersUploadsGetEndpoint(t *testing.T) {
 			Files []data.File `json:"files"`
 		}](t, recorder)
 		expected := []data.File{
-			{ID: data.FileID(firstFileID), Name: "alpha.txt", Filetype: data.FileKind("TXT"), OwnerID: data.UserID(userID), Status: data.FileStatusUploading, Size: 5},
-			{ID: data.FileID(lastFileID), Name: "movie.mov", Filetype: data.FileKind("MOV"), OwnerID: data.UserID(userID), Status: data.FileStatusUploading, Size: 1024},
+			{ID: data.FileID(firstFileID), Name: "alpha.txt", Type: data.FileType("TXT"), OwnerID: data.UserID(userID), Status: data.FileStatusUploading, Size: 5},
+			{ID: data.FileID(lastFileID), Name: "movie.mov", Type: data.FileType("MOV"), OwnerID: data.UserID(userID), Status: data.FileStatusUploading, Size: 1024},
 		}
 		if len(response.Files) != len(expected) {
 			t.Fatalf("got %d uploads, expected %d", len(response.Files), len(expected))
@@ -698,12 +698,12 @@ func TestFilesUploadPostEndpoint(t *testing.T) {
 		INSERT INTO files (id, name, owner_id, filetype, size, status)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id`)
-	body := []byte(`{"owner_id":"` + ownerID + `","name":"movie.mov","file_type":"MOV","size":1024}`)
+	body := []byte(`{"owner_id":"` + ownerID + `","name":"movie.mov","type":"MOV","size":1024}`)
 
 	t.Run("initializes upload", func(t *testing.T) {
 		app, mock := newTestApplication(t)
 		mock.ExpectQuery(query).
-			WithArgs(sqlmock.AnyArg(), "movie.mov", data.UserID(ownerID), data.FileKind("MOV"), int64(1024), data.FileStatusUploading).
+			WithArgs(sqlmock.AnyArg(), "movie.mov", data.UserID(ownerID), data.FileType("MOV"), int64(1024), data.FileStatusUploading).
 			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(fileID))
 
 		recorder := serveRequest(t, app, http.MethodPost, "/v1/files/upload", body)
@@ -770,8 +770,8 @@ func TestFilesUploadGetEndpoint(t *testing.T) {
 		if response.Upload.FileID != data.FileID(fileID) {
 			t.Errorf("got file ID %q, expected %q", response.Upload.FileID, fileID)
 		}
-		if response.Upload.FileType != data.FileKind("video/quicktime") {
-			t.Errorf("got file type %q, expected %q", response.Upload.FileType, "video/quicktime")
+		if response.Upload.Type != data.FileType("video/quicktime") {
+			t.Errorf("got file type %q, expected %q", response.Upload.Type, "video/quicktime")
 		}
 		if response.Upload.ReceivedSize != 32 {
 			t.Errorf("got received size %d, expected 32", response.Upload.ReceivedSize)

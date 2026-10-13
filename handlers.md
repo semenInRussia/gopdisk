@@ -32,7 +32,7 @@ Successful JSON responses wrap their primary resource:
     "file": {
         "id": "32f11d17-b1f5-4fb0-94ca-614903665dff",
         "name": "movie.mov",
-        "file_type": "video/quicktime",
+        "type": "video/quicktime",
         "owner_id": "baab6197-3e2d-4969-8492-247bbba900dc",
         "status": "ready",
         "size": 104857600
@@ -232,7 +232,7 @@ Returns only files in `ready` status, ordered by name and ID.
         {
             "id": "32f11d17-b1f5-4fb0-94ca-614903665dff",
             "name": "movie.mov",
-            "file_type": "video/quicktime",
+            "type": "video/quicktime",
             "owner_id": "baab6197-3e2d-4969-8492-247bbba900dc",
             "status": "ready",
             "size": 104857600
@@ -333,7 +333,7 @@ Idempotency-Key: client-generated-key
 {
     "owner_id": "baab6197-3e2d-4969-8492-247bbba900dc",
     "name": "movie.mov",
-    "file_type": "video/quicktime",
+    "type": "video/quicktime",
     "size": 104857600
 }
 ```
@@ -350,7 +350,7 @@ endpoint, and an upload resource:
         "file_id": "32f11d17-b1f5-4fb0-94ca-614903665dff",
         "owner_id": "baab6197-3e2d-4969-8492-247bbba900dc",
         "name": "movie.mov",
-        "file_type": "video/quicktime",
+        "type": "video/quicktime",
         "status": "uploading",
         "size": 104857600,
         "received_size": 0,
@@ -371,7 +371,7 @@ Content-Type: application/json
 ```json
 {
     "size": 125829120,
-    "file_type": "video/quicktime"
+    "type": "video/quicktime"
 }
 ```
 
@@ -393,7 +393,7 @@ GET /v1/uploads/:file_id
         "file_id": "32f11d17-b1f5-4fb0-94ca-614903665dff",
         "owner_id": "baab6197-3e2d-4969-8492-247bbba900dc",
         "name": "movie.mov",
-        "file_type": "video/quicktime",
+        "type": "video/quicktime",
         "status": "uploading",
         "size": 104857600,
         "received_size": 33554432,

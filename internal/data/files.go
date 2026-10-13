@@ -14,7 +14,7 @@ import (
 
 type FileID string
 type FileStatus string
-type FileKind string
+type FileType string
 
 var (
 	ErrBlobNotFound    = errors.New("cannot find a blob")
@@ -36,12 +36,12 @@ const (
 )
 
 type File struct {
-	ID       FileID     `json:"id"`
-	Name     string     `json:"name"`
-	Filetype FileKind   `json:"filetype"`
-	OwnerID  UserID     `json:"owner_id"`
-	Status   FileStatus `json:"status"`
-	Size     int64      `json:"size"`
+	ID      FileID     `json:"id"`
+	Name    string     `json:"name"`
+	Type    FileType   `json:"type"`
+	OwnerID UserID     `json:"owner_id"`
+	Status  FileStatus `json:"status"`
+	Size    int64      `json:"size"`
 }
 
 type UploadPart struct {
@@ -53,7 +53,7 @@ type Upload struct {
 	FileID       FileID       `json:"file_id"`
 	OwnerID      UserID       `json:"owner_id"`
 	Name         string       `json:"name"`
-	FileType     FileKind     `json:"file_type"`
+	Type         FileType     `json:"type"`
 	Status       FileStatus   `json:"status"`
 	Size         int64        `json:"size"`
 	ReceivedSize int64        `json:"received_size"`
@@ -79,7 +79,7 @@ func (s *FileModel) InsertWithStatus(ctx context.Context, file *File) error {
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id`
 
-	args := []any{GenerateFileID(), file.Name, file.OwnerID, file.Filetype, file.Size, file.Status}
+	args := []any{GenerateFileID(), file.Name, file.OwnerID, file.Type, file.Size, file.Status}
 
 	err := s.db.QueryRowContext(ctx, query, args...).Scan(&file.ID)
 
@@ -87,9 +87,9 @@ func (s *FileModel) InsertWithStatus(ctx context.Context, file *File) error {
 }
 
 // New constructs and inserts an empty file that can receive blobs before Commit.
-func (s *FileModel) New(ctx context.Context, ownerID UserID, name string, fileType FileKind, size int64) (*File, error) {
+func (s *FileModel) New(ctx context.Context, ownerID UserID, name string, fileType FileType, size int64) (*File, error) {
 	file := File{
-		ID: GenerateFileID(), Name: name, Filetype: fileType, OwnerID: ownerID, Size: size,
+		ID: GenerateFileID(), Name: name, Type: fileType, OwnerID: ownerID, Size: size,
 	}
 	if err := s.Insert(ctx, &file); err != nil {
 		return nil, err
@@ -131,7 +131,7 @@ func (s *FileModel) GetUpload(ctx context.Context, fileID FileID) (*Upload, erro
 			&upload.FileID,
 			&upload.OwnerID,
 			&upload.Name,
-			&upload.FileType,
+			&upload.Type,
 			&upload.Status,
 			&upload.Size,
 			&position,
@@ -221,7 +221,7 @@ func (s *FileModel) GetBlobs(ctx context.Context, fileID FileID) ([]blobs.Blob, 
 }
 
 // UploadData is a shortcut for New, AddDataBack, and Commit.
-func (s *FileModel) UploadData(ctx context.Context, ownerID UserID, name string, fileType FileKind, data []byte) (*File, error) {
+func (s *FileModel) UploadData(ctx context.Context, ownerID UserID, name string, fileType FileType, data []byte) (*File, error) {
 	file, err := s.New(ctx, ownerID, name, fileType, int64(len(data)))
 	if err != nil {
 		return nil, err
@@ -238,7 +238,7 @@ func (s *FileModel) UploadData(ctx context.Context, ownerID UserID, name string,
 }
 
 // UploadReader is a shortcut for New, AddReaderBack, and Commit.
-func (s *FileModel) UploadReader(ctx context.Context, ownerID UserID, name string, fileType FileKind, reader io.Reader, size int64) (*File, error) {
+func (s *FileModel) UploadReader(ctx context.Context, ownerID UserID, name string, fileType FileType, reader io.Reader, size int64) (*File, error) {
 	file, err := s.New(ctx, ownerID, name, fileType, size)
 	if err != nil {
 		return nil, err
@@ -540,7 +540,7 @@ func (s *FileModel) loadFileResult(ctx context.Context, fileID FileID, status Fi
 	row := s.db.QueryRowContext(ctx, query, args...)
 
 	var file File
-	err := row.Scan(&file.ID, &file.Name, &file.Filetype, &file.OwnerID, &file.Status, &file.Size)
+	err := row.Scan(&file.ID, &file.Name, &file.Type, &file.OwnerID, &file.Status, &file.Size)
 	if err != nil {
 		switch {
 		case errors.Is(err, sql.ErrNoRows):

@@ -31,7 +31,7 @@ Main domain types:
 ```go
 type FileID string
 type UserID string
-type FileKind string
+type FileType string
 type FileStatus string
 
 type User struct {
@@ -40,12 +40,12 @@ type User struct {
 }
 
 type File struct {
-    ID       FileID
-    Name     string
-    Filetype FileKind
-    OwnerID  UserID
-    Status   FileStatus
-    Blobs    []blobs.Blob
+    ID      FileID
+    Name    string
+    Type    FileType
+    OwnerID UserID
+    Status  FileStatus
+    Blobs   []blobs.Blob
 }
 ```
 

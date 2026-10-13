@@ -116,7 +116,7 @@ func (s *UserModel) GetFilesWithStatus(ctx context.Context, userID UserID, statu
 
 	for rows.Next() {
 		var file File
-		err := rows.Scan(&file.ID, &file.Name, &file.Filetype, &file.OwnerID, &file.Status, &file.Size)
+		err := rows.Scan(&file.ID, &file.Name, &file.Type, &file.OwnerID, &file.Status, &file.Size)
 
 		if err != nil {
 			return nil, err

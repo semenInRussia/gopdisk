@@ -130,10 +130,10 @@ func (app *Application) filesDeleteHandler(w http.ResponseWriter, r *http.Reques
 
 func (app *Application) filesUploadsPostHandler(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		OwnerId  string `json:"owner_id"`
-		Name     string `json:"name"`
-		FileType string `json:"file_type"`
-		Size     int64  `json:"size"`
+		OwnerId string `json:"owner_id"`
+		Name    string `json:"name"`
+		Type    string `json:"type"`
+		Size    int64  `json:"size"`
 	}
 
 	err := app.readJSON(w, r, &input)
@@ -144,10 +144,10 @@ func (app *Application) filesUploadsPostHandler(w http.ResponseWriter, r *http.R
 	}
 
 	file := data.File{
-		OwnerID:  data.UserID(input.OwnerId),
-		Name:     input.Name,
-		Filetype: data.FileKind(input.FileType),
-		Size:     input.Size,
+		OwnerID: data.UserID(input.OwnerId),
+		Name:    input.Name,
+		Type:    data.FileType(input.Type),
+		Size:    input.Size,
 	}
 
 	err = app.storage.Files.Insert(r.Context(), &file)
@@ -255,7 +255,7 @@ func (app *Application) filesContentHeadHandler(w http.ResponseWriter, r *http.R
 }
 
 func setFileContentHeaders(w http.ResponseWriter, file *data.File) {
-	w.Header().Set("Content-Type", string(file.Filetype))
+	w.Header().Set("Content-Type", string(file.Type))
 	w.Header().Set("Content-Length", strconv.FormatInt(file.Size, 10))
 }
 
