@@ -332,6 +332,49 @@ func (s *FileModel) AddBlob(ctx context.Context, fileID FileID, position int, bl
 	return s.putBlob(ctx, fileID, position, blob)
 }
 
+// RemoveBlob removes the blob association at position from an unfinished upload.
+// The physical blob remains available for reference-aware garbage collection.
+func (s *FileModel) RemoveBlob(ctx context.Context, fileID FileID, position int) error {
+	if position < 0 {
+		return ErrInvalidPosition
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var exists bool
+	if err := tx.QueryRowContext(ctx,
+		`SELECT TRUE FROM files WHERE id = $1 AND status = $2 FOR UPDATE`,
+		fileID, FileStatusUploading).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrFileNotFound
+		}
+		return err
+	}
+
+	result, err := tx.ExecContext(ctx,
+		`DELETE FROM file_blobs WHERE file_id = $1 AND position = $2`,
+		fileID, position)
+	if err != nil {
+		return err
+	}
+	removed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if removed == 0 {
+		return ErrBlobNotFound
+	}
+
+	return tx.Commit()
+}
+
 // Commit makes an uploading file visible to regular read and list operations.
 func (s *FileModel) Commit(ctx context.Context, fileID FileID) error {
 	tx, err := s.db.BeginTx(ctx, nil)

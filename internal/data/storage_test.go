@@ -584,6 +584,60 @@ func TestPositionedAddsCanRunConcurrently(t *testing.T) {
 	}
 }
 
+func TestRemoveBlobRemovesOnlyRequestedUploadPosition(t *testing.T) {
+	s := getStorage(t)
+	user, err := s.Users.New(context.Background(), "Part removal user")
+	if err != nil {
+		t.Fatalf("cannot add user: %v", err)
+	}
+	file, err := s.Files.New(context.Background(), user.ID, "removal", "TXT", 3)
+	if err != nil {
+		t.Fatalf("cannot create file: %v", err)
+	}
+
+	for position, value := range []byte("abc") {
+		if _, err := s.Files.AddData(context.Background(), file.ID, position, []byte{value}); err != nil {
+			t.Fatalf("cannot add part at position %d: %v", position, err)
+		}
+	}
+
+	if err := s.Files.RemoveBlob(context.Background(), file.ID, 1); err != nil {
+		t.Fatalf("cannot remove part: %v", err)
+	}
+
+	upload, err := s.Files.GetUpload(context.Background(), file.ID)
+	if err != nil {
+		t.Fatalf("cannot get upload: %v", err)
+	}
+	expected := []UploadPart{{Position: 0, Size: 1}, {Position: 2, Size: 1}}
+	if len(upload.Parts) != len(expected) {
+		t.Fatalf("got %d parts, expected %d", len(upload.Parts), len(expected))
+	}
+	for i := range expected {
+		if upload.Parts[i] != expected[i] {
+			t.Errorf("got part %d %+v, expected %+v", i, upload.Parts[i], expected[i])
+		}
+	}
+	if upload.ReceivedSize != 2 {
+		t.Errorf("got received size %d, expected 2", upload.ReceivedSize)
+	}
+
+	storedBlobs, err := s.bs.ListBlobs()
+	if err != nil {
+		t.Fatalf("cannot list physical blobs: %v", err)
+	}
+	if len(storedBlobs) != 3 {
+		t.Errorf("got %d physical blobs, expected all 3 to remain for garbage collection", len(storedBlobs))
+	}
+
+	if err := s.Files.RemoveBlob(context.Background(), file.ID, 1); !errors.Is(err, ErrBlobNotFound) {
+		t.Fatalf("removing missing part returned %v, expected %v", err, ErrBlobNotFound)
+	}
+	if err := s.Files.RemoveBlob(context.Background(), file.ID, -1); !errors.Is(err, ErrInvalidPosition) {
+		t.Fatalf("removing negative position returned %v, expected %v", err, ErrInvalidPosition)
+	}
+}
+
 func TestReadUsesCanceledContext(t *testing.T) {
 	s := getStorage(t)
 

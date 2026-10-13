@@ -310,3 +310,32 @@ func (app *Application) uploadsPartsPutHandler(w http.ResponseWriter, r *http.Re
 		app.serverErrorResponse(w, err)
 	}
 }
+
+func (app *Application) uploadsPartsDeleteHandler(w http.ResponseWriter, r *http.Request) {
+	fileID, err := app.getUUIDParam(r, "file_id")
+	if err != nil {
+		app.badRequestErrorResponse(w, err)
+		return
+	}
+
+	position, err := app.getInt64Param(r, "position")
+	if err != nil {
+		app.badRequestErrorResponse(w, err)
+		return
+	}
+
+	err = app.storage.Files.RemoveBlob(r.Context(), data.FileID(fileID), int(position))
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrFileNotFound), errors.Is(err, data.ErrBlobNotFound):
+			app.errorResponse(w, err.Error(), http.StatusNotFound)
+		case errors.Is(err, data.ErrInvalidPosition):
+			app.badRequestErrorResponse(w, "got invalid position to remove")
+		default:
+			app.serverErrorResponse(w, err)
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}

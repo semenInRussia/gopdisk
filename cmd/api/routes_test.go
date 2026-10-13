@@ -998,6 +998,103 @@ func TestUploadsPartsPutEndpoint(t *testing.T) {
 	})
 }
 
+func TestUploadsPartsDeleteEndpoint(t *testing.T) {
+	const fileID = "32f11d17-b1f5-4fb0-94ca-614903665dff"
+	const position = 2
+
+	lockUploadQuery := regexp.QuoteMeta("SELECT TRUE FROM files WHERE id = $1 AND status = $2 FOR UPDATE")
+	deletePartQuery := regexp.QuoteMeta("DELETE FROM file_blobs WHERE file_id = $1 AND position = $2")
+	target := fmt.Sprintf("/v1/uploads/%s/parts/%d", fileID, position)
+
+	expectUploadLock := func(mock sqlmock.Sqlmock) {
+		mock.ExpectBegin()
+		mock.ExpectQuery(lockUploadQuery).
+			WithArgs(data.FileID(fileID), data.FileStatusUploading).
+			WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	}
+
+	t.Run("removes an uploaded part", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		expectUploadLock(mock)
+		mock.ExpectExec(deletePartQuery).
+			WithArgs(data.FileID(fileID), position).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectCommit()
+
+		recorder := serveRequest(t, app, http.MethodDelete, target, nil)
+
+		if recorder.Code != http.StatusNoContent {
+			t.Fatalf("got status %d, expected %d; body: %s", recorder.Code, http.StatusNoContent, recorder.Body.String())
+		}
+		if recorder.Body.Len() != 0 {
+			t.Errorf("got response body %q, expected an empty body", recorder.Body.String())
+		}
+	})
+
+	t.Run("rejects an invalid file ID", func(t *testing.T) {
+		app, _ := newTestApplication(t)
+
+		recorder := serveRequest(t, app, http.MethodDelete, "/v1/uploads/not-a-uuid/parts/0", nil)
+
+		assertJSONResponse(t, recorder, http.StatusBadRequest)
+	})
+
+	t.Run("rejects a nonnumeric position", func(t *testing.T) {
+		app, _ := newTestApplication(t)
+
+		recorder := serveRequest(t, app, http.MethodDelete, "/v1/uploads/"+fileID+"/parts/not-a-number", nil)
+
+		assertJSONResponse(t, recorder, http.StatusBadRequest)
+	})
+
+	t.Run("rejects a negative position", func(t *testing.T) {
+		app, _ := newTestApplication(t)
+
+		recorder := serveRequest(t, app, http.MethodDelete, "/v1/uploads/"+fileID+"/parts/-1", nil)
+
+		assertJSONResponse(t, recorder, http.StatusBadRequest)
+	})
+
+	t.Run("returns not found for a missing or completed upload", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectBegin()
+		mock.ExpectQuery(lockUploadQuery).
+			WithArgs(data.FileID(fileID), data.FileStatusUploading).
+			WillReturnRows(sqlmock.NewRows([]string{"exists"}))
+		mock.ExpectRollback()
+
+		recorder := serveRequest(t, app, http.MethodDelete, target, nil)
+
+		assertJSONResponse(t, recorder, http.StatusNotFound)
+	})
+
+	t.Run("returns not found for a missing part", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		expectUploadLock(mock)
+		mock.ExpectExec(deletePartQuery).
+			WithArgs(data.FileID(fileID), position).
+			WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectRollback()
+
+		recorder := serveRequest(t, app, http.MethodDelete, target, nil)
+
+		assertJSONResponse(t, recorder, http.StatusNotFound)
+	})
+
+	t.Run("returns server error on delete failure", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		expectUploadLock(mock)
+		mock.ExpectExec(deletePartQuery).
+			WithArgs(data.FileID(fileID), position).
+			WillReturnError(errors.New("delete failed"))
+		mock.ExpectRollback()
+
+		recorder := serveRequest(t, app, http.MethodDelete, target, nil)
+
+		assertJSONResponse(t, recorder, http.StatusInternalServerError)
+	})
+}
+
 func TestFilesContentGetEndpoint(t *testing.T) {
 	const (
 		fileID  = "32f11d17-b1f5-4fb0-94ca-614903665dff"
