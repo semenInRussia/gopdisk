@@ -947,6 +947,15 @@ func TestUploadsPartsPutEndpoint(t *testing.T) {
 		assertJSONResponse(t, recorder, http.StatusBadRequest)
 	})
 
+	t.Run("rejects an empty part", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		expectBlobLookup(mock, false)
+
+		recorder := serveRequest(t, app, http.MethodPut, fmt.Sprintf("/v1/uploads/%s/parts/%d", fileID, position), nil)
+
+		assertJSONResponse(t, recorder, http.StatusBadRequest)
+	})
+
 	t.Run("stores one blob from a larger request body", func(t *testing.T) {
 		previousMaxPartSize := blobs.BlobsMaxSize
 		blobs.BlobsMaxSize = 4

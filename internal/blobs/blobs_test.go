@@ -21,8 +21,19 @@ func TestAddOneChunkReader(t *testing.T) {
 		t.Fatalf("cannot create blob storage: %v", err)
 	}
 
-	for _, data := range [][]byte{nil, []byte("abcd")} {
-		blob, err := bs.AddOneChunkReader(bytes.NewReader(data))
+	if _, err := bs.AddReader(bytes.NewReader(nil)); !errors.Is(err, io.EOF) {
+		t.Fatalf("AddOneChunkReader(empty) returned %v, expected %v", err, io.EOF)
+	}
+	listed, err := bs.ListBlobs()
+	if err != nil {
+		t.Fatalf("cannot list blobs after empty reader: %v", err)
+	}
+	if len(listed) != 0 {
+		t.Fatalf("empty reader stored %d blobs, expected none", len(listed))
+	}
+
+	for _, data := range [][]byte{[]byte("abcd")} {
+		blob, err := bs.AddReader(bytes.NewReader(data))
 		if err != nil {
 			t.Fatalf("AddOneChunkReader(%q) returned error: %v", data, err)
 		}
@@ -35,11 +46,11 @@ func TestAddOneChunkReader(t *testing.T) {
 		}
 	}
 
-	if _, err := bs.AddOneChunk([]byte("abcde")); !errors.Is(err, ErrBlobOverflow) {
+	if _, err := bs.AddData([]byte("abcde")); !errors.Is(err, ErrBlobOverflow) {
 		t.Fatalf("AddOneChunk returned %v, expected %v", err, ErrBlobOverflow)
 	}
 	reader := bytes.NewReader([]byte("abcde"))
-	limited, err := bs.AddOneChunkReader(reader)
+	limited, err := bs.AddReader(reader)
 	if err != nil {
 		t.Fatalf("AddOneChunkReader returned error for reader with remaining data: %v", err)
 	}
@@ -61,11 +72,11 @@ func TestAddOneChunkReader(t *testing.T) {
 		t.Fatalf("got stored data %q, expected %q", stored, "abcd")
 	}
 
-	fromBytes, err := bs.AddOneChunk([]byte("abcd"))
+	fromBytes, err := bs.AddData([]byte("abcd"))
 	if err != nil {
 		t.Fatalf("AddOneChunk returned error: %v", err)
 	}
-	fromReader, err := bs.AddOneChunkReader(bytes.NewReader([]byte("abcd")))
+	fromReader, err := bs.AddReader(bytes.NewReader([]byte("abcd")))
 	if err != nil {
 		t.Fatalf("AddOneChunkReader returned error: %v", err)
 	}
@@ -86,7 +97,7 @@ func TestAddOneChunkReaderReturnsReaderErrors(t *testing.T) {
 	}
 	expectedErr := errors.New("reader failed")
 
-	if _, err := bs.AddOneChunkReader(iotest.ErrReader(expectedErr)); !errors.Is(err, expectedErr) {
+	if _, err := bs.AddReader(iotest.ErrReader(expectedErr)); !errors.Is(err, expectedErr) {
 		t.Fatalf("AddOneChunkReader returned %v, expected %v", err, expectedErr)
 	}
 	assertNoTemporaryBlobs(t, bs.Path)

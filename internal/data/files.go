@@ -1,7 +1,6 @@
 package data
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -266,7 +265,7 @@ func (s *FileModel) AddDataBack(ctx context.Context, fileID FileID, data []byte)
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		blob, err := s.bs.AddOneChunk(chunk)
+		blob, err := s.bs.AddData(chunk)
 		if err != nil {
 			return nil, err
 		}
@@ -278,11 +277,19 @@ func (s *FileModel) AddDataBack(ctx context.Context, fileID FileID, data []byte)
 	return stored, nil
 }
 
-// AddReaderBack stores reader contents as one independent sequence of blobs and appends it to file.
+// AddReaderBack stores reader contents as an ordered sequence of blobs and appends it to file.
 func (s *FileModel) AddReaderBack(ctx context.Context, fileID FileID, reader io.Reader) ([]blobs.Blob, error) {
-	stored, err := s.storeReaderChunks(ctx, reader)
-	if err != nil {
-		return nil, err
+	reader = contextReader{ctx: ctx, reader: reader}
+	stored := make([]blobs.Blob, 0)
+	for {
+		blob, err := s.bs.AddReader(reader)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		stored = append(stored, *blob)
 	}
 	if err := s.appendBlobs(ctx, fileID, stored); err != nil {
 		return nil, err
@@ -304,31 +311,6 @@ func (s *FileModel) blobCountForSize(size int64) int {
 	return int((size + blobs.BlobsMaxSize - 1) / blobs.BlobsMaxSize)
 }
 
-func (s *FileModel) storeReaderChunks(ctx context.Context, reader io.Reader) ([]blobs.Blob, error) {
-	reader = contextReader{ctx: ctx, reader: reader}
-	stored := make([]blobs.Blob, 0)
-
-	for {
-		chunk := make([]byte, blobs.BlobsMaxSize)
-		size, err := io.ReadFull(reader, chunk)
-		if errors.Is(err, io.EOF) {
-			return stored, nil
-		}
-		if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
-			return nil, err
-		}
-
-		blob, storeErr := s.bs.AddOneChunkReader(bytes.NewReader(chunk[:size]))
-		if storeErr != nil {
-			return nil, storeErr
-		}
-		stored = append(stored, *blob)
-		if errors.Is(err, io.ErrUnexpectedEOF) {
-			return stored, nil
-		}
-	}
-}
-
 // AddBlobBack appends metadata for an already stored physical blob to file.
 func (s *FileModel) AddBlobBack(ctx context.Context, fileID FileID, blob blobs.Blob) error {
 	return s.appendBlobs(ctx, fileID, []blobs.Blob{blob})
@@ -343,7 +325,7 @@ func (s *FileModel) AddData(ctx context.Context, fileID FileID, position int, da
 		return nil, err
 	}
 
-	stored, err := s.bs.AddOneChunk(data)
+	stored, err := s.bs.AddData(data)
 	if err != nil {
 		return nil, err
 	}
@@ -364,7 +346,7 @@ func (s *FileModel) AddReader(ctx context.Context, fileID FileID, position int, 
 	}
 
 	limited := io.LimitReader(contextReader{ctx: ctx, reader: reader}, blobs.BlobsMaxSize)
-	stored, err := s.bs.AddOneChunkReader(limited)
+	stored, err := s.bs.AddReader(limited)
 	if err != nil {
 		return nil, err
 	}

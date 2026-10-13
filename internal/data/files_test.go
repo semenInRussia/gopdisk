@@ -462,7 +462,7 @@ func TestAddReaderAndAddBlob(t *testing.T) {
 	if len(readerBlobs) != 1 {
 		t.Fatalf("got %d reader blobs, expected 1", len(readerBlobs))
 	}
-	lastBlob, err := s.bs.AddOneChunk([]byte("efg"))
+	lastBlob, err := s.bs.AddData([]byte("efg"))
 	if err != nil {
 		t.Fatalf("cannot store standalone blob: %v", err)
 	}
@@ -506,7 +506,7 @@ func TestPositionedAddsReplaceAndPreserveOrder(t *testing.T) {
 	if _, err := s.Files.AddDataBack(context.Background(), file.ID, []byte("dd")); err != nil {
 		t.Fatalf("cannot append data after a position gap: %v", err)
 	}
-	positionOne, err := s.bs.AddOneChunk([]byte("bb"))
+	positionOne, err := s.bs.AddData([]byte("bb"))
 	if err != nil {
 		t.Fatalf("cannot store standalone blob: %v", err)
 	}
@@ -550,7 +550,7 @@ func TestPositionedAddsValidatePositionAndSize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot create file: %v", err)
 	}
-	blob, err := s.bs.AddOneChunk([]byte("data"))
+	blob, err := s.bs.AddData([]byte("data"))
 	if err != nil {
 		t.Fatalf("cannot store standalone blob: %v", err)
 	}

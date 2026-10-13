@@ -284,6 +284,8 @@ func (app *Application) uploadsPartsPutHandler(w http.ResponseWriter, r *http.Re
 			app.errorResponse(w, err.Error(), http.StatusNotFound)
 		case errors.Is(err, data.ErrInvalidPosition):
 			app.badRequestErrorResponse(w, "got invalid position to upload")
+		case errors.Is(err, io.EOF):
+			app.badRequestErrorResponse(w, "cannot upload an empty part")
 		default:
 			app.serverErrorResponse(w, err)
 		}

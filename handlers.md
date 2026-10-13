@@ -429,6 +429,7 @@ must send additional data as separate parts at subsequent positions.
 
 - A new position returns `201 Created`.
 - Replacing an existing position returns `200 OK`.
+- An empty part returns `400 Bad Request`.
 - Uploading to a completed or canceled upload returns `404 Not Found`.
 
 ```json

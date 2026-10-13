@@ -97,7 +97,7 @@ func TestFileBelongsToUser(t *testing.T) {
 func TestCollectGarbageBlobsDeletesUnreferencedBlob(t *testing.T) {
 	s := getGarbageCollectionStorage(t)
 
-	blob, err := s.bs.AddOneChunk([]byte("unused blob"))
+	blob, err := s.bs.AddData([]byte("unused blob"))
 	if err != nil {
 		t.Fatalf("cannot write blob file: %v", err)
 	}

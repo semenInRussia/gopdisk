@@ -35,16 +35,17 @@ func MakeBlobStorage(path string) (*BlobStorage, error) {
 	return &s, err
 }
 
-func (bs *BlobStorage) AddOneChunk(data []byte) (*Blob, error) {
+func (bs *BlobStorage) AddData(data []byte) (*Blob, error) {
 	if int64(len(data)) > BlobsMaxSize {
 		return nil, ErrBlobOverflow
 	}
-	return bs.AddOneChunkReader(bytes.NewReader(data))
+	return bs.AddReader(bytes.NewReader(data))
 }
 
-// AddOneChunkReader reads and stores at most one blob from reader, leaving any
-// remaining data unread.
-func (bs *BlobStorage) AddOneChunkReader(reader io.Reader) (*Blob, error) {
+// AddReader reads and stores at most one blob from reader, leaving any
+// remaining data unread. It returns io.EOF without storing a blob when the
+// reader has no data.
+func (bs *BlobStorage) AddReader(reader io.Reader) (*Blob, error) {
 	temporary, err := os.CreateTemp(bs.Path, ".blob-*")
 	if err != nil {
 		return nil, err
@@ -56,6 +57,9 @@ func (bs *BlobStorage) AddOneChunkReader(reader io.Reader) (*Blob, error) {
 	size, err := io.Copy(io.MultiWriter(temporary, hasher), io.LimitReader(reader, BlobsMaxSize))
 	if err != nil {
 		return nil, err
+	}
+	if size == 0 {
+		return nil, io.EOF
 	}
 	if err := temporary.Chmod(0644); err != nil {
 		return nil, err
