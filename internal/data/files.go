@@ -244,7 +244,7 @@ func (s *FileModel) AddDataBack(ctx context.Context, fileID FileID, data []byte)
 
 // AddReaderBack stores reader contents as one independent sequence of blobs and appends it to file.
 func (s *FileModel) AddReaderBack(ctx context.Context, fileID FileID, reader io.Reader) ([]blobs.Blob, error) {
-	stored, err := s.readAndStoreBlobs(ctx, reader)
+	stored, err := s.bs.AddDataReader(contextReader{ctx: ctx, reader: reader})
 	if err != nil {
 		return nil, err
 	}
@@ -287,14 +287,14 @@ func (s *FileModel) AddReader(ctx context.Context, fileID FileID, position int, 
 		return nil, err
 	}
 
-	data, err := io.ReadAll(io.LimitReader(reader, blobs.BlobsMaxSize+1))
+	stored, err := s.bs.AddOneChunkReader(contextReader{ctx: ctx, reader: reader})
 	if err != nil {
 		return nil, err
 	}
-	if err := ctx.Err(); err != nil {
+	if err := s.putBlob(ctx, fileID, position, *stored); err != nil {
 		return nil, err
 	}
-	return s.AddData(ctx, fileID, position, data)
+	return stored, nil
 }
 
 // AddBlob associates an already stored physical blob with position, replacing any blob already there.
@@ -496,30 +496,16 @@ func (s *FileModel) putBlob(ctx context.Context, fileID FileID, position int, bl
 	return tx.Commit()
 }
 
-func (s *FileModel) readAndStoreBlobs(ctx context.Context, reader io.Reader) ([]blobs.Blob, error) {
-	var stored []blobs.Blob
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		chunk := make([]byte, blobs.BlobsMaxSize)
-		size, err := io.ReadFull(reader, chunk)
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
-			return nil, err
-		}
-		blob, storeErr := s.bs.AddOneChunk(chunk[:size])
-		if storeErr != nil {
-			return nil, storeErr
-		}
-		stored = append(stored, *blob)
-		if errors.Is(err, io.ErrUnexpectedEOF) {
-			break
-		}
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r contextReader) Read(data []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
 	}
-	return stored, nil
+	return r.reader.Read(data)
 }
 
 func closedReadChannels(err error) (<-chan []byte, <-chan error) {
