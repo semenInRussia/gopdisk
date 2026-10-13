@@ -68,7 +68,7 @@ func (app *Application) filesPatchHandler(w http.ResponseWriter, r *http.Request
 		Name string
 	}
 
-	err = app.readJSON(r, &input)
+	err = app.readJSON(w, r, &input)
 
 	if err != nil {
 		app.badRequestErrorResponse(w, err)
@@ -136,7 +136,7 @@ func (app *Application) filesUploadsPostHandler(w http.ResponseWriter, r *http.R
 		Size     int64  `json:"size"`
 	}
 
-	err := app.readJSON(r, &input)
+	err := app.readJSON(w, r, &input)
 
 	if err != nil {
 		app.badRequestErrorResponse(w, err)

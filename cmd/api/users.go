@@ -12,7 +12,7 @@ func (app *Application) usersPostHandler(w http.ResponseWriter, r *http.Request)
 		Name string `json:"name"`
 	}
 
-	err := app.readJSON(r, &input)
+	err := app.readJSON(w, r, &input)
 	if err != nil {
 		app.badRequestErrorResponse(w, err)
 		return
