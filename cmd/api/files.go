@@ -23,6 +23,8 @@ func (app *Application) getFileByPathID(w http.ResponseWriter, r *http.Request) 
 
 	if err != nil {
 		switch {
+		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+			return nil, err
 		case errors.Is(err, data.ErrFileNotFound):
 			app.errorResponse(w, err.Error(), http.StatusNotFound)
 		default:
