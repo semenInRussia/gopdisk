@@ -42,6 +42,22 @@ type File struct {
 	Size     int64      `json:"size"`
 }
 
+type UploadPart struct {
+	Position int   `json:"position"`
+	Size     int64 `json:"size"`
+}
+
+type Upload struct {
+	FileID       FileID       `json:"file_id"`
+	OwnerID      UserID       `json:"owner_id"`
+	Name         string       `json:"name"`
+	FileType     FileKind     `json:"file_type"`
+	Status       FileStatus   `json:"status"`
+	Size         int64        `json:"size"`
+	ReceivedSize int64        `json:"received_size"`
+	Parts        []UploadPart `json:"parts"`
+}
+
 type FileModel struct {
 	bs *blobs.BlobStorage
 	db *sql.DB
@@ -81,6 +97,63 @@ func (s *FileModel) New(ctx context.Context, ownerID UserID, name string, fileTy
 
 func (s *FileModel) Get(ctx context.Context, fileID FileID) (*File, error) {
 	return s.loadFileResult(ctx, fileID, FileStatusReady)
+}
+
+// GetUpload returns a consistent snapshot of an unfinished upload and its parts.
+func (s *FileModel) GetUpload(ctx context.Context, fileID FileID) (*Upload, error) {
+	query := `
+		SELECT f.id, f.owner_id, f.name, f.filetype, f.status, f.size, fb.position, b.size
+		FROM files f
+		LEFT JOIN file_blobs fb ON fb.file_id = f.id
+		LEFT JOIN blobs b ON b.hash = fb.blob_hash
+		WHERE f.id = $1 AND f.status = $2
+		ORDER BY fb.position
+	`
+
+	args := []any{fileID, FileStatusUploading}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	upload := Upload{Parts: make([]UploadPart, 0)}
+	found := false
+	for rows.Next() {
+		found = true
+
+		var position sql.NullInt64
+		var partSize sql.NullInt64
+		if err := rows.Scan(
+			&upload.FileID,
+			&upload.OwnerID,
+			&upload.Name,
+			&upload.FileType,
+			&upload.Status,
+			&upload.Size,
+			&position,
+			&partSize,
+		); err != nil {
+			return nil, err
+		}
+
+		if position.Valid && partSize.Valid {
+			upload.Parts = append(upload.Parts, UploadPart{
+				Position: int(position.Int64),
+				Size:     partSize.Int64,
+			})
+			upload.ReceivedSize += partSize.Int64
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, ErrFileNotFound
+	}
+
+	return &upload, nil
 }
 
 // GetBlobs returns file blobs in their logical order.
