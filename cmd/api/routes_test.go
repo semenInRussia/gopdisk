@@ -1226,6 +1226,58 @@ func TestUploadsCompletePostEndpoint(t *testing.T) {
 	})
 }
 
+func TestUploadsDeleteEndpoint(t *testing.T) {
+	const fileID = "32f11d17-b1f5-4fb0-94ca-614903665dff"
+	deleteQuery := regexp.QuoteMeta("DELETE FROM files WHERE id = $1 AND status = $2")
+	target := "/v1/uploads/" + fileID
+
+	t.Run("cancels an unfinished upload", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectExec(deleteQuery).
+			WithArgs(data.FileID(fileID), data.FileStatusUploading).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+
+		recorder := serveRequest(t, app, http.MethodDelete, target, nil)
+
+		if recorder.Code != http.StatusNoContent {
+			t.Fatalf("got status %d, expected %d; body: %s", recorder.Code, http.StatusNoContent, recorder.Body.String())
+		}
+		if recorder.Body.Len() != 0 {
+			t.Errorf("got response body %q, expected an empty body", recorder.Body.String())
+		}
+	})
+
+	t.Run("rejects an invalid file ID", func(t *testing.T) {
+		app, _ := newTestApplication(t)
+
+		recorder := serveRequest(t, app, http.MethodDelete, "/v1/uploads/not-a-uuid", nil)
+
+		assertJSONResponse(t, recorder, http.StatusBadRequest)
+	})
+
+	t.Run("returns not found for a missing or completed upload", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectExec(deleteQuery).
+			WithArgs(data.FileID(fileID), data.FileStatusUploading).
+			WillReturnResult(sqlmock.NewResult(0, 0))
+
+		recorder := serveRequest(t, app, http.MethodDelete, target, nil)
+
+		assertJSONResponse(t, recorder, http.StatusNotFound)
+	})
+
+	t.Run("returns server error on delete failure", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectExec(deleteQuery).
+			WithArgs(data.FileID(fileID), data.FileStatusUploading).
+			WillReturnError(errors.New("delete failed"))
+
+		recorder := serveRequest(t, app, http.MethodDelete, target, nil)
+
+		assertJSONResponse(t, recorder, http.StatusInternalServerError)
+	})
+}
+
 func TestFilesContentGetEndpoint(t *testing.T) {
 	const (
 		fileID  = "32f11d17-b1f5-4fb0-94ca-614903665dff"

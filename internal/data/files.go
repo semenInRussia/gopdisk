@@ -463,6 +463,29 @@ func (s *FileModel) Delete(ctx context.Context, fileID FileID) error {
 	return err
 }
 
+// CancelUpload removes an unfinished upload and its blob associations.
+// Physical blobs remain available for reference-aware garbage collection.
+func (s *FileModel) CancelUpload(ctx context.Context, fileID FileID) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	result, err := s.db.ExecContext(ctx,
+		`DELETE FROM files WHERE id = $1 AND status = $2`,
+		fileID, FileStatusUploading)
+	if err != nil {
+		return err
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if deleted == 0 {
+		return ErrFileNotFound
+	}
+	return nil
+}
+
 func (s *FileModel) Rename(ctx context.Context, fileID FileID, newName string) (*File, error) {
 	file, err := s.Get(ctx, fileID)
 	if err != nil {

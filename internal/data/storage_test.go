@@ -675,6 +675,50 @@ func TestRemoveBlobRemovesOnlyRequestedUploadPosition(t *testing.T) {
 	}
 }
 
+func TestCancelUploadRemovesOnlyUnfinishedMetadata(t *testing.T) {
+	s := getStorage(t)
+	user, err := s.Users.New(context.Background(), "Upload cancellation user")
+	if err != nil {
+		t.Fatalf("cannot add user: %v", err)
+	}
+
+	upload, err := s.Files.New(context.Background(), user.ID, "unfinished", "TXT", 4)
+	if err != nil {
+		t.Fatalf("cannot create upload: %v", err)
+	}
+	if _, err := s.Files.AddData(context.Background(), upload.ID, 0, []byte("part")); err != nil {
+		t.Fatalf("cannot add upload part: %v", err)
+	}
+
+	if err := s.Files.CancelUpload(context.Background(), upload.ID); err != nil {
+		t.Fatalf("cannot cancel upload: %v", err)
+	}
+	if _, err := s.Files.GetUpload(context.Background(), upload.ID); !errors.Is(err, ErrFileNotFound) {
+		t.Fatalf("getting canceled upload returned %v, expected %v", err, ErrFileNotFound)
+	}
+	if _, err := s.Files.GetBlobs(context.Background(), upload.ID); !errors.Is(err, ErrFileNotFound) {
+		t.Fatalf("getting canceled upload blobs returned %v, expected %v", err, ErrFileNotFound)
+	}
+	storedBlobs, err := s.bs.ListBlobs()
+	if err != nil {
+		t.Fatalf("cannot list physical blobs: %v", err)
+	}
+	if len(storedBlobs) != 1 {
+		t.Errorf("got %d physical blobs, expected one pending garbage collection", len(storedBlobs))
+	}
+
+	ready, err := s.Files.UploadData(context.Background(), user.ID, "ready", "TXT", []byte("ready"))
+	if err != nil {
+		t.Fatalf("cannot create completed file: %v", err)
+	}
+	if err := s.Files.CancelUpload(context.Background(), ready.ID); !errors.Is(err, ErrFileNotFound) {
+		t.Fatalf("canceling completed file returned %v, expected %v", err, ErrFileNotFound)
+	}
+	if _, err := s.Files.Get(context.Background(), ready.ID); err != nil {
+		t.Fatalf("completed file changed after cancellation attempt: %v", err)
+	}
+}
+
 func TestReadUsesCanceledContext(t *testing.T) {
 	s := getStorage(t)
 

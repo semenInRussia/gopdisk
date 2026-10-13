@@ -380,3 +380,24 @@ func (app *Application) uploadsCompletePostHandler(w http.ResponseWriter, r *htt
 		app.serverErrorResponse(w, err)
 	}
 }
+
+func (app *Application) uploadsDeleteHandler(w http.ResponseWriter, r *http.Request) {
+	fileID, err := app.getUUIDParam(r, "file_id")
+	if err != nil {
+		app.badRequestErrorResponse(w, err)
+		return
+	}
+
+	err = app.storage.Files.CancelUpload(r.Context(), data.FileID(fileID))
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrFileNotFound):
+			app.errorResponse(w, err.Error(), http.StatusNotFound)
+		default:
+			app.serverErrorResponse(w, err)
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
