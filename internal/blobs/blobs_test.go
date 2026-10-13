@@ -3,6 +3,7 @@ package blobs
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -34,11 +35,30 @@ func TestAddOneChunkReader(t *testing.T) {
 		}
 	}
 
-	if _, err := bs.AddOneChunkReader(bytes.NewReader([]byte("abcde"))); !errors.Is(err, ErrBlobOverflow) {
-		t.Fatalf("got error %v, expected %v", err, ErrBlobOverflow)
-	}
 	if _, err := bs.AddOneChunk([]byte("abcde")); !errors.Is(err, ErrBlobOverflow) {
 		t.Fatalf("AddOneChunk returned %v, expected %v", err, ErrBlobOverflow)
+	}
+	reader := bytes.NewReader([]byte("abcde"))
+	limited, err := bs.AddOneChunkReader(reader)
+	if err != nil {
+		t.Fatalf("AddOneChunkReader returned error for reader with remaining data: %v", err)
+	}
+	if limited.Size != BlobsMaxSize {
+		t.Fatalf("stored blob has size %d, expected %d", limited.Size, BlobsMaxSize)
+	}
+	remaining, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("cannot read remaining reader data: %v", err)
+	}
+	if !bytes.Equal(remaining, []byte("e")) {
+		t.Fatalf("got remaining data %q, expected %q", remaining, "e")
+	}
+	stored, err := bs.ReadBlob(*limited)
+	if err != nil {
+		t.Fatalf("cannot read limited blob: %v", err)
+	}
+	if !bytes.Equal(stored, []byte("abcd")) {
+		t.Fatalf("got stored data %q, expected %q", stored, "abcd")
 	}
 
 	fromBytes, err := bs.AddOneChunk([]byte("abcd"))

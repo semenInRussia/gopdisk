@@ -567,16 +567,28 @@ func TestPositionedAddsValidatePositionAndSize(t *testing.T) {
 	if _, err := s.Files.AddData(context.Background(), file.ID, 0, []byte("12345")); !errors.Is(err, blobs.ErrBlobOverflow) {
 		t.Fatalf("oversized AddData returned %v, expected %v", err, blobs.ErrBlobOverflow)
 	}
-	if _, err := s.Files.AddReader(context.Background(), file.ID, 0, strings.NewReader("12345")); !errors.Is(err, blobs.ErrBlobOverflow) {
-		t.Fatalf("oversized AddReader returned %v, expected %v", err, blobs.ErrBlobOverflow)
+	reader := strings.NewReader("12345")
+	stored, err := s.Files.AddReader(context.Background(), file.ID, 0, reader)
+	if err != nil {
+		t.Fatalf("AddReader returned error for reader with remaining data: %v", err)
+	}
+	if stored.Size != blobs.BlobsMaxSize {
+		t.Fatalf("AddReader stored %d bytes, expected %d", stored.Size, blobs.BlobsMaxSize)
+	}
+	remaining, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("cannot read remaining data: %v", err)
+	}
+	if string(remaining) != "5" {
+		t.Fatalf("got remaining data %q, expected %q", remaining, "5")
 	}
 
 	fileBlobs, err := s.Files.GetBlobs(context.Background(), file.ID)
 	if err != nil {
 		t.Fatalf("cannot get file blobs: %v", err)
 	}
-	if len(fileBlobs) != 0 {
-		t.Fatalf("got %d blobs after rejected writes, expected 0", len(fileBlobs))
+	if len(fileBlobs) != 1 || fileBlobs[0] != *stored {
+		t.Fatalf("got blobs %+v, expected only %+v", fileBlobs, *stored)
 	}
 }
 

@@ -421,13 +421,15 @@ Content-Type: application/octet-stream
 Content-Length: 16777216
 ```
 
-Positions are zero-based. Parts may be sent concurrently and out of order. A
-part must not exceed the server's `BlobsMaxSize` limit, currently 16 MiB.
+Positions are zero-based. Parts may be sent concurrently and out of order. The
+server reads at most `BlobsMaxSize`, currently 16 MiB, from each request body.
+If the body contains more data, only the first `BlobsMaxSize` bytes are stored
+for that position; trailing bytes are not part of the uploaded blob. Clients
+must send additional data as separate parts at subsequent positions.
 
 - A new position returns `201 Created`.
 - Replacing an existing position returns `200 OK`.
 - Uploading to a completed or canceled upload returns `404 Not Found`.
-- If data size is bigger than max blob size, raise error (badrequest)
 
 ```json
 {

@@ -36,10 +36,14 @@ func MakeBlobStorage(path string) (*BlobStorage, error) {
 }
 
 func (bs *BlobStorage) AddOneChunk(data []byte) (*Blob, error) {
+	if int64(len(data)) > BlobsMaxSize {
+		return nil, ErrBlobOverflow
+	}
 	return bs.AddOneChunkReader(bytes.NewReader(data))
 }
 
-// AddOneChunkReader reads and stores at most one blob from reader.
+// AddOneChunkReader reads and stores at most one blob from reader, leaving any
+// remaining data unread.
 func (bs *BlobStorage) AddOneChunkReader(reader io.Reader) (*Blob, error) {
 	temporary, err := os.CreateTemp(bs.Path, ".blob-*")
 	if err != nil {
@@ -49,12 +53,9 @@ func (bs *BlobStorage) AddOneChunkReader(reader io.Reader) (*Blob, error) {
 	defer os.Remove(temporary.Name())
 
 	hasher := sha256.New()
-	size, err := io.Copy(io.MultiWriter(temporary, hasher), io.LimitReader(reader, BlobsMaxSize+1))
+	size, err := io.Copy(io.MultiWriter(temporary, hasher), io.LimitReader(reader, BlobsMaxSize))
 	if err != nil {
 		return nil, err
-	}
-	if size > BlobsMaxSize {
-		return nil, ErrBlobOverflow
 	}
 	if err := temporary.Chmod(0644); err != nil {
 		return nil, err

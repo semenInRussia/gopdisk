@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"gopherdisk/internal/blobs"
 	"gopherdisk/internal/data"
 	"gopherdisk/internal/validator"
 	"io"
@@ -285,8 +284,6 @@ func (app *Application) uploadsPartsPutHandler(w http.ResponseWriter, r *http.Re
 			app.errorResponse(w, err.Error(), http.StatusNotFound)
 		case errors.Is(err, data.ErrInvalidPosition):
 			app.badRequestErrorResponse(w, "got invalid position to upload")
-		case errors.Is(err, blobs.ErrBlobOverflow):
-			app.badRequestErrorResponse(w, "got more data than expected")
 		default:
 			app.serverErrorResponse(w, err)
 		}

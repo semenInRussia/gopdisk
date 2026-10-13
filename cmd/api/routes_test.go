@@ -947,23 +947,31 @@ func TestUploadsPartsPutEndpoint(t *testing.T) {
 		assertJSONResponse(t, recorder, http.StatusBadRequest)
 	})
 
-	t.Run("rejects an oversized part", func(t *testing.T) {
+	t.Run("stores one blob from a larger request body", func(t *testing.T) {
 		previousMaxPartSize := blobs.BlobsMaxSize
 		blobs.BlobsMaxSize = 4
 		t.Cleanup(func() { blobs.BlobsMaxSize = previousMaxPartSize })
 
 		app, mock, storagePath := newTestApplicationWithStoragePath(t)
 		expectBlobLookup(mock, false)
+		expectPartStored(mock, []byte("1234"))
 
 		recorder := serveRequest(t, app, http.MethodPut, fmt.Sprintf("/v1/uploads/%s/parts/%d", fileID, position), []byte("12345"))
 
-		assertJSONResponse(t, recorder, http.StatusBadRequest)
+		assertPartResponse(t, recorder, http.StatusCreated, blobs.BlobsMaxSize)
 		entries, err := os.ReadDir(storagePath)
 		if err != nil {
 			t.Fatalf("cannot read test blob directory: %v", err)
 		}
-		if len(entries) != 0 {
-			t.Errorf("got %d stored files after rejected upload, expected none", len(entries))
+		if len(entries) != 1 {
+			t.Fatalf("got %d stored files, expected one", len(entries))
+		}
+		stored, err := os.ReadFile(storagePath + "/" + entries[0].Name())
+		if err != nil {
+			t.Fatalf("cannot read stored blob: %v", err)
+		}
+		if !bytes.Equal(stored, []byte("1234")) {
+			t.Errorf("got stored data %q, expected %q", stored, "1234")
 		}
 	})
 

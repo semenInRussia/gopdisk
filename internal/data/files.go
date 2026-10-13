@@ -353,7 +353,8 @@ func (s *FileModel) AddData(ctx context.Context, fileID FileID, position int, da
 	return stored, nil
 }
 
-// AddReader stores reader contents as one blob at position, replacing any blob already there.
+// AddReader stores at most one blob from reader at position, replacing any blob
+// already there and leaving data beyond BlobsMaxSize unread.
 func (s *FileModel) AddReader(ctx context.Context, fileID FileID, position int, reader io.Reader) (*blobs.Blob, error) {
 	if position < 0 {
 		return nil, ErrInvalidPosition
@@ -362,7 +363,8 @@ func (s *FileModel) AddReader(ctx context.Context, fileID FileID, position int, 
 		return nil, err
 	}
 
-	stored, err := s.bs.AddOneChunkReader(contextReader{ctx: ctx, reader: reader})
+	limited := io.LimitReader(contextReader{ctx: ctx, reader: reader}, blobs.BlobsMaxSize)
+	stored, err := s.bs.AddOneChunkReader(limited)
 	if err != nil {
 		return nil, err
 	}
