@@ -1095,6 +1095,137 @@ func TestUploadsPartsDeleteEndpoint(t *testing.T) {
 	})
 }
 
+func TestUploadsCompletePostEndpoint(t *testing.T) {
+	const (
+		fileID  = "32f11d17-b1f5-4fb0-94ca-614903665dff"
+		ownerID = "baab6197-3e2d-4969-8492-247bbba900dc"
+	)
+
+	lockUploadQuery := regexp.QuoteMeta("SELECT size FROM files WHERE id = $1 AND status = $2 FOR UPDATE")
+	partsQuery := regexp.QuoteMeta(`
+		SELECT fb.position, b.size
+		FROM file_blobs fb
+		JOIN blobs b ON b.hash = fb.blob_hash
+		WHERE fb.file_id = $1
+		ORDER BY fb.position`)
+	updateQuery := regexp.QuoteMeta("UPDATE files SET status = $1 WHERE id = $2")
+	getFileQuery := regexp.QuoteMeta("SELECT id, name, filetype, owner_id, status, size FROM files WHERE id = $1 AND status = $2")
+	fileColumns := []string{"id", "name", "filetype", "owner_id", "status", "size"}
+	target := "/v1/uploads/" + fileID + "/complete"
+	declaredSize := blobs.BlobsMaxSize + 3
+
+	expectCompletedFile := func(mock sqlmock.Sqlmock) {
+		mock.ExpectQuery(getFileQuery).
+			WithArgs(data.FileID(fileID), data.FileStatusReady).
+			WillReturnRows(sqlmock.NewRows(fileColumns).
+				AddRow(fileID, "movie.mov", "video/quicktime", ownerID, data.FileStatusReady, declaredSize))
+	}
+
+	assertCompletedFile := func(t *testing.T, recorder *httptest.ResponseRecorder) {
+		t.Helper()
+		assertJSONResponse(t, recorder, http.StatusOK)
+		response := decodeResponse[struct {
+			File data.File `json:"file"`
+		}](t, recorder)
+		if response.File.ID != data.FileID(fileID) || response.File.Status != data.FileStatusReady {
+			t.Errorf("got file %+v, expected completed file %q", response.File, fileID)
+		}
+	}
+
+	t.Run("validates and completes an upload", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectBegin()
+		mock.ExpectQuery(lockUploadQuery).
+			WithArgs(data.FileID(fileID), data.FileStatusUploading).
+			WillReturnRows(sqlmock.NewRows([]string{"size"}).AddRow(declaredSize))
+		mock.ExpectQuery(partsQuery).
+			WithArgs(data.FileID(fileID)).
+			WillReturnRows(sqlmock.NewRows([]string{"position", "size"}).
+				AddRow(0, blobs.BlobsMaxSize).
+				AddRow(1, int64(3)))
+		mock.ExpectExec(updateQuery).
+			WithArgs(data.FileStatusReady, data.FileID(fileID)).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectCommit()
+		expectCompletedFile(mock)
+
+		recorder := serveRequest(t, app, http.MethodPost, target, nil)
+
+		assertCompletedFile(t, recorder)
+	})
+
+	t.Run("is idempotent for a completed upload", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectBegin()
+		mock.ExpectQuery(lockUploadQuery).
+			WithArgs(data.FileID(fileID), data.FileStatusUploading).
+			WillReturnRows(sqlmock.NewRows([]string{"size"}))
+		mock.ExpectRollback()
+		expectCompletedFile(mock)
+
+		recorder := serveRequest(t, app, http.MethodPost, target, nil)
+
+		assertCompletedFile(t, recorder)
+	})
+
+	t.Run("rejects invalid part ordering", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectBegin()
+		mock.ExpectQuery(lockUploadQuery).
+			WithArgs(data.FileID(fileID), data.FileStatusUploading).
+			WillReturnRows(sqlmock.NewRows([]string{"size"}).AddRow(declaredSize))
+		mock.ExpectQuery(partsQuery).
+			WithArgs(data.FileID(fileID)).
+			WillReturnRows(sqlmock.NewRows([]string{"position", "size"}).
+				AddRow(0, blobs.BlobsMaxSize).
+				AddRow(2, int64(3)))
+		mock.ExpectRollback()
+
+		recorder := serveRequest(t, app, http.MethodPost, target, nil)
+
+		assertJSONResponse(t, recorder, http.StatusConflict)
+		response := decodeResponse[struct {
+			Error string `json:"error"`
+		}](t, recorder)
+		if response.Error == "" {
+			t.Error("expected completion validation details")
+		}
+	})
+
+	t.Run("rejects an invalid file ID", func(t *testing.T) {
+		app, _ := newTestApplication(t)
+
+		recorder := serveRequest(t, app, http.MethodPost, "/v1/uploads/not-a-uuid/complete", nil)
+
+		assertJSONResponse(t, recorder, http.StatusBadRequest)
+	})
+
+	t.Run("returns not found for a missing upload", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectBegin()
+		mock.ExpectQuery(lockUploadQuery).
+			WithArgs(data.FileID(fileID), data.FileStatusUploading).
+			WillReturnRows(sqlmock.NewRows([]string{"size"}))
+		mock.ExpectRollback()
+		mock.ExpectQuery(getFileQuery).
+			WithArgs(data.FileID(fileID), data.FileStatusReady).
+			WillReturnRows(sqlmock.NewRows(fileColumns))
+
+		recorder := serveRequest(t, app, http.MethodPost, target, nil)
+
+		assertJSONResponse(t, recorder, http.StatusNotFound)
+	})
+
+	t.Run("returns server error on storage failure", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectBegin().WillReturnError(errors.New("begin failed"))
+
+		recorder := serveRequest(t, app, http.MethodPost, target, nil)
+
+		assertJSONResponse(t, recorder, http.StatusInternalServerError)
+	})
+}
+
 func TestFilesContentGetEndpoint(t *testing.T) {
 	const (
 		fileID  = "32f11d17-b1f5-4fb0-94ca-614903665dff"

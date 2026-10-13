@@ -305,7 +305,7 @@ func TestNewAddDataCommitAndRead(t *testing.T) {
 	if len(fileBlobs) != 0 {
 		t.Fatalf("new file already has %d blobs", len(fileBlobs))
 	}
-	for i, part := range [][]byte{[]byte("hel"), []byte("lo-world")} {
+	for i, part := range [][]byte{[]byte("hell"), []byte("o-world")} {
 		if _, err := s.Files.AddDataBack(context.Background(), file.ID, part); err != nil {
 			t.Fatalf("cannot add data %d: %v", i, err)
 		}
@@ -332,7 +332,7 @@ func TestNewAddDataCommitAndRead(t *testing.T) {
 	if loaded.Size != int64(len("hello-world")) || len(fileBlobs) != 3 {
 		t.Fatalf("got size %d and %d blobs, expected size 11 and 3 blobs", loaded.Size, len(fileBlobs))
 	}
-	for i, expectedSize := range []int{3, 4, 4} {
+	for i, expectedSize := range []int{4, 4, 3} {
 		if fileBlobs[i].Size != int64(expectedSize) {
 			t.Fatalf("blob %d has size %d, expected %d", i, fileBlobs[i].Size, expectedSize)
 		}
@@ -416,14 +416,14 @@ func TestAddReaderAndAddBlob(t *testing.T) {
 		t.Fatalf("cannot create file: %v", err)
 	}
 
-	readerBlobs, err := s.Files.AddReaderBack(context.Background(), file.ID, strings.NewReader("abcde"))
+	readerBlobs, err := s.Files.AddReaderBack(context.Background(), file.ID, strings.NewReader("abcd"))
 	if err != nil {
 		t.Fatalf("cannot add reader: %v", err)
 	}
-	if len(readerBlobs) != 2 {
-		t.Fatalf("got %d reader blobs, expected 2", len(readerBlobs))
+	if len(readerBlobs) != 1 {
+		t.Fatalf("got %d reader blobs, expected 1", len(readerBlobs))
 	}
-	lastBlob, err := s.bs.AddOneChunk([]byte("fg"))
+	lastBlob, err := s.bs.AddOneChunk([]byte("efg"))
 	if err != nil {
 		t.Fatalf("cannot store standalone blob: %v", err)
 	}
@@ -445,7 +445,7 @@ func TestAddReaderAndAddBlob(t *testing.T) {
 
 func TestPositionedAddsReplaceAndPreserveOrder(t *testing.T) {
 	previousMaxPartSize := blobs.BlobsMaxSize
-	blobs.BlobsMaxSize = 4
+	blobs.BlobsMaxSize = 2
 	t.Cleanup(func() { blobs.BlobsMaxSize = previousMaxPartSize })
 
 	s := getStorage(t)
@@ -542,6 +542,10 @@ func TestPositionedAddsValidatePositionAndSize(t *testing.T) {
 }
 
 func TestPositionedAddsCanRunConcurrently(t *testing.T) {
+	previousMaxPartSize := blobs.BlobsMaxSize
+	blobs.BlobsMaxSize = 1
+	t.Cleanup(func() { blobs.BlobsMaxSize = previousMaxPartSize })
+
 	s := getStorage(t)
 	user, err := s.Users.New(context.Background(), "Concurrent positioned upload user")
 	if err != nil {
@@ -581,6 +585,39 @@ func TestPositionedAddsCanRunConcurrently(t *testing.T) {
 	}
 	if string(got) != "abcdefgh" {
 		t.Fatalf("got %q, expected %q", got, "abcdefgh")
+	}
+}
+
+func TestValidateUploadParts(t *testing.T) {
+	previousMaxPartSize := blobs.BlobsMaxSize
+	blobs.BlobsMaxSize = 4
+	t.Cleanup(func() { blobs.BlobsMaxSize = previousMaxPartSize })
+
+	tests := []struct {
+		name         string
+		declaredSize int64
+		parts        []UploadPart
+		wantErr      bool
+	}{
+		{name: "empty upload", declaredSize: 0},
+		{name: "complete upload", declaredSize: 10, parts: []UploadPart{{Position: 0, Size: 4}, {Position: 1, Size: 4}, {Position: 2, Size: 2}}},
+		{name: "missing first position", declaredSize: 4, parts: []UploadPart{{Position: 1, Size: 4}}, wantErr: true},
+		{name: "position gap", declaredSize: 6, parts: []UploadPart{{Position: 0, Size: 4}, {Position: 2, Size: 2}}, wantErr: true},
+		{name: "short non-final part", declaredSize: 5, parts: []UploadPart{{Position: 0, Size: 3}, {Position: 1, Size: 2}}, wantErr: true},
+		{name: "oversized final part", declaredSize: 5, parts: []UploadPart{{Position: 0, Size: 5}}, wantErr: true},
+		{name: "size mismatch", declaredSize: 5, parts: []UploadPart{{Position: 0, Size: 4}}, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateUploadParts(tt.declaredSize, tt.parts)
+			if tt.wantErr && !errors.Is(err, ErrEarlyCommit) {
+				t.Fatalf("got error %v, expected %v", err, ErrEarlyCommit)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("unexpected validation error: %v", err)
+			}
+		})
 	}
 }
 

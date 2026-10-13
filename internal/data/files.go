@@ -375,7 +375,7 @@ func (s *FileModel) RemoveBlob(ctx context.Context, fileID FileID, position int)
 	return tx.Commit()
 }
 
-// Commit makes an uploading file visible to regular read and list operations.
+// Commit validates an upload and makes it visible to regular read and list operations.
 func (s *FileModel) Commit(ctx context.Context, fileID FileID) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -383,7 +383,7 @@ func (s *FileModel) Commit(ctx context.Context, fileID FileID) error {
 	}
 	defer tx.Rollback()
 
-	var declaredSize int
+	var declaredSize int64
 	if err := tx.QueryRowContext(ctx,
 		`SELECT size FROM files WHERE id = $1 AND status = $2 FOR UPDATE`,
 		fileID, FileStatusUploading).Scan(&declaredSize); err != nil {
@@ -393,16 +393,35 @@ func (s *FileModel) Commit(ctx context.Context, fileID FileID) error {
 		return err
 	}
 
-	var storedSize int
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COALESCE(SUM(b.size), 0)
+	rows, err := tx.QueryContext(ctx, `
+		SELECT fb.position, b.size
 		FROM file_blobs fb
 		JOIN blobs b ON b.hash = fb.blob_hash
-		WHERE fb.file_id = $1`, fileID).Scan(&storedSize); err != nil {
+		WHERE fb.file_id = $1
+		ORDER BY fb.position`, fileID)
+	if err != nil {
 		return err
 	}
-	if storedSize != declaredSize {
-		return ErrEarlyCommit
+
+	parts := make([]UploadPart, 0)
+	for rows.Next() {
+		var part UploadPart
+		if err := rows.Scan(&part.Position, &part.Size); err != nil {
+			rows.Close()
+			return err
+		}
+		parts = append(parts, part)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+
+	if err := validateUploadParts(declaredSize, parts); err != nil {
+		return err
 	}
 
 	_, err = tx.ExecContext(ctx, `UPDATE files SET status = $1 WHERE id = $2`, FileStatusReady, fileID)
@@ -410,6 +429,26 @@ func (s *FileModel) Commit(ctx context.Context, fileID FileID) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+func validateUploadParts(declaredSize int64, parts []UploadPart) error {
+	var storedSize int64
+	for i, part := range parts {
+		if part.Position != i {
+			return fmt.Errorf("%w: expected part at position %d, got %d", ErrEarlyCommit, i, part.Position)
+		}
+		if i < len(parts)-1 && part.Size != blobs.BlobsMaxSize {
+			return fmt.Errorf("%w: part %d has size %d, expected %d", ErrEarlyCommit, part.Position, part.Size, blobs.BlobsMaxSize)
+		}
+		if i == len(parts)-1 && part.Size > blobs.BlobsMaxSize {
+			return fmt.Errorf("%w: final part has size %d, maximum is %d", ErrEarlyCommit, part.Size, blobs.BlobsMaxSize)
+		}
+		storedSize += part.Size
+	}
+	if storedSize != declaredSize {
+		return fmt.Errorf("%w: received %d of %d bytes", ErrEarlyCommit, storedSize, declaredSize)
+	}
+	return nil
 }
 
 func (s *FileModel) Delete(ctx context.Context, fileID FileID) error {

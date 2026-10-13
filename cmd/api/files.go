@@ -339,3 +339,44 @@ func (app *Application) uploadsPartsDeleteHandler(w http.ResponseWriter, r *http
 
 	w.WriteHeader(http.StatusNoContent)
 }
+
+func (app *Application) uploadsCompletePostHandler(w http.ResponseWriter, r *http.Request) {
+	fileID, err := app.getUUIDParam(r, "file_id")
+	if err != nil {
+		app.badRequestErrorResponse(w, err)
+		return
+	}
+
+	id := data.FileID(fileID)
+	if err := app.storage.Files.Commit(r.Context(), id); err != nil {
+		switch {
+		case errors.Is(err, data.ErrEarlyCommit):
+			app.errorResponse(w, err.Error(), http.StatusConflict)
+		case errors.Is(err, data.ErrFileNotFound):
+			file, getErr := app.storage.Files.Get(r.Context(), id)
+			if getErr == nil {
+				if err := app.writeJSON(w, Envelope{"file": file}, http.StatusOK, nil); err != nil {
+					app.serverErrorResponse(w, err)
+				}
+				return
+			}
+			if errors.Is(getErr, data.ErrFileNotFound) {
+				app.errorResponse(w, err.Error(), http.StatusNotFound)
+				return
+			}
+			app.serverErrorResponse(w, getErr)
+		default:
+			app.serverErrorResponse(w, err)
+		}
+		return
+	}
+
+	file, err := app.storage.Files.Get(r.Context(), id)
+	if err != nil {
+		app.serverErrorResponse(w, err)
+		return
+	}
+	if err := app.writeJSON(w, Envelope{"file": file}, http.StatusOK, nil); err != nil {
+		app.serverErrorResponse(w, err)
+	}
+}
