@@ -2,11 +2,11 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"gopherdisk/internal/validator"
 	"maps"
 	"net/http"
+	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/julienschmidt/httprouter"
@@ -75,13 +75,14 @@ func (app *Application) writeValidatorErrors(w http.ResponseWriter, v *validator
 	app.errorResponse(w, v.Errors, status)
 }
 
-func (app *Application) getIdParam(r *http.Request) (string, error) {
+func (app *Application) getInt64Param(r *http.Request, name string) (int64, error) {
 	params := httprouter.ParamsFromContext(r.Context())
-	id := params.ByName("id")
-	if id == "" {
-		return "", errors.New("id is required, but not provided")
+	numStr := params.ByName(name)
+	num, err := strconv.ParseInt(numStr, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("cannot read number from params: %v", err)
 	}
-	return id, nil
+	return num, nil
 }
 
 func (app *Application) getUUIDParam(r *http.Request, name string) (string, error) {

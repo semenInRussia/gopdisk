@@ -17,10 +17,11 @@ type FileStatus string
 type FileKind string
 
 var (
-	ErrFileNotFound    = errors.New("cannot find a file")
-	ErrInvalidSize     = errors.New("size must not be negative")
-	ErrInvalidPosition = errors.New("position must not be negative")
+	ErrBlobNotFound    = errors.New("cannot find a blob")
 	ErrEarlyCommit     = errors.New("cannot commit file before all data is added")
+	ErrFileNotFound    = errors.New("cannot find a file")
+	ErrInvalidPosition = errors.New("position must not be negative")
+	ErrInvalidSize     = errors.New("size must not be negative")
 )
 
 const (
@@ -155,6 +156,32 @@ func (s *FileModel) GetUpload(ctx context.Context, fileID FileID) (*Upload, erro
 	}
 
 	return &upload, nil
+}
+
+func (s *FileModel) GetOneBlob(ctx context.Context, fileID FileID, pos int) (*blobs.Blob, error) {
+	query := `
+		SELECT b.hash, b.size
+		FROM files f
+		LEFT JOIN file_blobs fb ON fb.file_id = f.id
+		LEFT JOIN blobs b ON b.hash = fb.blob_hash
+		WHERE f.id = $1 and fb.position = $2
+	`
+
+	args := []any{fileID, pos}
+
+	var blob blobs.Blob
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(&blob.Hash, &blob.Size)
+
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, ErrBlobNotFound
+		default:
+			return nil, err
+		}
+	}
+
+	return &blob, nil
 }
 
 // GetBlobs returns file blobs in their logical order.

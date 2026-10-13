@@ -43,7 +43,7 @@ func (app *Application) usersPostHandler(w http.ResponseWriter, r *http.Request)
 }
 
 func (app *Application) usersGetHandler(w http.ResponseWriter, r *http.Request) {
-	id, err := app.getIdParam(r)
+	id, err := app.getUUIDParam(r, "id")
 	if err != nil {
 		app.badRequestErrorResponse(w, err)
 		return
@@ -71,7 +71,7 @@ func (app *Application) usersGetHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 func (app *Application) usersDeleteHandler(w http.ResponseWriter, r *http.Request) {
-	id, err := app.getIdParam(r)
+	id, err := app.getUUIDParam(r, "id")
 	if err != nil {
 		app.badRequestErrorResponse(w, err)
 		return
@@ -92,7 +92,7 @@ func (app *Application) usersDeleteHandler(w http.ResponseWriter, r *http.Reques
 }
 
 func (app *Application) usersFilesGetHandler(w http.ResponseWriter, r *http.Request) {
-	id, err := app.getIdParam(r)
+	id, err := app.getUUIDParam(r, "id")
 	if err != nil {
 		app.badRequestErrorResponse(w, err)
 		return
@@ -121,7 +121,7 @@ func (app *Application) usersFilesGetHandler(w http.ResponseWriter, r *http.Requ
 }
 
 func (app *Application) usersUploadsGetHandler(w http.ResponseWriter, r *http.Request) {
-	id, err := app.getIdParam(r)
+	id, err := app.getUUIDParam(r, "id")
 	if err != nil {
 		app.badRequestErrorResponse(w, err)
 		return

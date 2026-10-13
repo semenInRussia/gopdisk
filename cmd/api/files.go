@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"gopherdisk/internal/blobs"
 	"gopherdisk/internal/data"
 	"gopherdisk/internal/validator"
 	"io"
@@ -12,7 +13,7 @@ import (
 
 // get id from request params, find it in DB. Handler errors and return file and occured error (if can).
 func (app *Application) getFileByPathID(w http.ResponseWriter, r *http.Request) (*data.File, error) {
-	idStr, err := app.getIdParam(r)
+	idStr, err := app.getUUIDParam(r, "id")
 	if err != nil {
 		app.badRequestErrorResponse(w, err)
 		return nil, err
@@ -55,7 +56,7 @@ func (app *Application) filesGetHandler(w http.ResponseWriter, r *http.Request) 
 
 // rename given file
 func (app *Application) filesPatchHandler(w http.ResponseWriter, r *http.Request) {
-	idStr, err := app.getIdParam(r)
+	idStr, err := app.getUUIDParam(r, "id")
 	if err != nil {
 		app.badRequestErrorResponse(w, err)
 		return
@@ -104,7 +105,7 @@ func (app *Application) filesPatchHandler(w http.ResponseWriter, r *http.Request
 }
 
 func (app *Application) filesDeleteHandler(w http.ResponseWriter, r *http.Request) {
-	idStr, err := app.getIdParam(r)
+	idStr, err := app.getUUIDParam(r, "id")
 	if err != nil {
 		app.badRequestErrorResponse(w, err)
 		return
@@ -161,7 +162,7 @@ func (app *Application) filesUploadsPostHandler(w http.ResponseWriter, r *http.R
 	app.writeJSON(w, data, http.StatusOK, nil)
 }
 
-func (app *Application) filesUploadGetHandler(w http.ResponseWriter, r *http.Request) {
+func (app *Application) uploadsGetHandler(w http.ResponseWriter, r *http.Request) {
 	id, err := app.getUUIDParam(r, "file_id")
 	if err != nil {
 		app.badRequestErrorResponse(w, err.Error())
@@ -230,7 +231,7 @@ func (app *Application) filesContentGetHandler(w http.ResponseWriter, r *http.Re
 }
 
 func (app *Application) filesContentHeadHandler(w http.ResponseWriter, r *http.Request) {
-	idStr, err := app.getIdParam(r)
+	idStr, err := app.getUUIDParam(r, "id")
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
@@ -256,4 +257,56 @@ func (app *Application) filesContentHeadHandler(w http.ResponseWriter, r *http.R
 func setFileContentHeaders(w http.ResponseWriter, file *data.File) {
 	w.Header().Set("Content-Type", string(file.Filetype))
 	w.Header().Set("Content-Length", strconv.FormatInt(file.Size, 10))
+}
+
+func (app *Application) uploadsPartsPutHandler(w http.ResponseWriter, r *http.Request) {
+	fileIDStr, err := app.getUUIDParam(r, "file_id")
+	if err != nil {
+		app.badRequestErrorResponse(w, err)
+		return
+	}
+
+	fileID := data.FileID(fileIDStr)
+
+	pos, err := app.getInt64Param(r, "position")
+	if err != nil {
+		app.badRequestErrorResponse(w, err)
+		return
+	}
+
+	_, err = app.storage.Files.GetOneBlob(r.Context(), fileID, int(pos))
+	existsBefore := err == nil
+
+	blob, err := app.storage.Files.AddReader(r.Context(), fileID, int(pos), r.Body)
+
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrFileNotFound):
+			app.errorResponse(w, err.Error(), http.StatusNotFound)
+		case errors.Is(err, data.ErrInvalidPosition):
+			app.badRequestErrorResponse(w, "got invalid position to upload")
+		case errors.Is(err, blobs.ErrBlobOverflow):
+			app.badRequestErrorResponse(w, "got more data than expected")
+		default:
+			app.serverErrorResponse(w, err)
+		}
+		return
+	}
+
+	data := Envelope{
+		"part": data.UploadPart{
+			Position: int(pos),
+			Size:     blob.Size,
+		},
+	}
+
+	status := http.StatusCreated
+	if existsBefore {
+		status = http.StatusOK
+	}
+
+	err = app.writeJSON(w, data, status, nil)
+	if err != nil {
+		app.serverErrorResponse(w, err)
+	}
 }

@@ -426,7 +426,8 @@ part must not exceed the server's `BlobsMaxSize` limit, currently 16 MiB.
 
 - A new position returns `201 Created`.
 - Replacing an existing position returns `200 OK`.
-- Uploading to a completed or canceled upload returns `409 Conflict`.
+- Uploading to a completed or canceled upload returns `404 Not Found`.
+- If data size is bigger than max blob size, raise error (badrequest)
 
 ```json
 {
