@@ -119,6 +119,16 @@ func (app *Application) serverErrorResponse(w http.ResponseWriter, err error) {
 	app.errorResponse(w, "the server encountered a problem and could not process your request", http.StatusInternalServerError)
 }
 
+func (app *Application) notFoundResponse(w http.ResponseWriter, _ *http.Request) {
+	message := "the requested resource could not be found"
+	app.errorResponse(w, message, http.StatusNotFound)
+}
+
+func (app *Application) methodNotAllowedResponse(w http.ResponseWriter, r *http.Request) {
+	message := fmt.Sprintf("the %s method is not supported for this resource", r.Method)
+	app.errorResponse(w, message, http.StatusMethodNotAllowed)
+}
+
 func (app *Application) writeValidatorErrors(w http.ResponseWriter, v *validator.Validator) {
 	status := http.StatusUnprocessableEntity
 	if v.IsValid() {
