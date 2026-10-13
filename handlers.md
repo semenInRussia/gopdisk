@@ -29,14 +29,14 @@ Successful JSON responses wrap their primary resource:
 
 ```json
 {
-  "file": {
-    "id": "32f11d17-b1f5-4fb0-94ca-614903665dff",
-    "name": "movie.mov",
-    "file_type": "video/quicktime",
-    "owner_id": "baab6197-3e2d-4969-8492-247bbba900dc",
-    "status": "ready",
-    "size": 104857600
-  }
+    "file": {
+        "id": "32f11d17-b1f5-4fb0-94ca-614903665dff",
+        "name": "movie.mov",
+        "file_type": "video/quicktime",
+        "owner_id": "baab6197-3e2d-4969-8492-247bbba900dc",
+        "status": "ready",
+        "size": 104857600
+    }
 }
 ```
 
@@ -44,10 +44,10 @@ Collections use the plural resource name and include pagination metadata:
 
 ```json
 {
-  "files": [],
-  "pagination": {
-    "next_cursor": null
-  }
+    "files": [],
+    "pagination": {
+        "next_cursor": null
+    }
 }
 ```
 
@@ -57,10 +57,10 @@ Errors have a stable machine-readable code and a human-readable message:
 
 ```json
 {
-  "error": {
-    "code": "file_not_found",
-    "message": "file not found"
-  }
+    "error": {
+        "code": "file_not_found",
+        "message": "file not found"
+    }
 }
 ```
 
@@ -68,28 +68,28 @@ Validation errors may include field details:
 
 ```json
 {
-  "error": {
-    "code": "validation_failed",
-    "message": "request validation failed",
-    "fields": {
-      "size": "must not be negative"
+    "error": {
+        "code": "validation_failed",
+        "message": "request validation failed",
+        "fields": {
+            "size": "must not be negative"
+        }
     }
-  }
 }
 ```
 
 Common status codes:
 
-| Status | Meaning |
-| ------ | ------- |
+| Status | Meaning                                                         |
+| ------ | --------------------------------------------------------------- |
 | `400`  | Malformed JSON, invalid UUID, cursor, range, or path parameter. |
-| `404`  | The requested user, file, upload, or part does not exist. |
-| `409`  | The request conflicts with the resource's current state. |
-| `413`  | A request body or uploaded part exceeds the allowed size. |
-| `415`  | The request uses an unsupported content type. |
-| `416`  | A download range cannot be satisfied. |
-| `422`  | The request is well-formed but fails field validation. |
-| `500`  | An unexpected database, filesystem, or server error occurred. |
+| `404`  | The requested user, file, upload, or part does not exist.       |
+| `409`  | The request conflicts with the resource's current state.        |
+| `413`  | A request body or uploaded part exceeds the allowed size.       |
+| `415`  | The request uses an unsupported content type.                   |
+| `416`  | A download range cannot be satisfied.                           |
+| `422`  | The request is well-formed but fails field validation.          |
+| `500`  | An unexpected database, filesystem, or server error occurred.   |
 
 ### Pagination
 
@@ -113,41 +113,41 @@ with a different body returns `409 Conflict`.
 
 ### Service
 
-| Method | Path              | Purpose |
-| ------ | ----------------- | ------- |
+| Method | Path              | Purpose                                      |
+| ------ | ----------------- | -------------------------------------------- |
 | `GET`  | `/v1/healthcheck` | Read service health and version information. |
 
 ### Users
 
-| Method   | Path                         | Purpose |
-| -------- | ---------------------------- | ------- |
-| `POST`   | `/v1/users`                  | Create a user. |
-| `GET`    | `/v1/users/:id`              | Read a user. |
-| `DELETE` | `/v1/users/:id`              | Delete a user. |
-| `GET`    | `/v1/users/:id/files`        | List the user's completed files. |
-| `GET`    | `/v1/users/:id/uploads`      | List the user's unfinished uploads. |
+| Method   | Path                    | Purpose                             |
+| -------- | ----------------------- | ----------------------------------- |
+| `POST`   | `/v1/users`             | Create a user.                      |
+| `GET`    | `/v1/users/:id`         | Read a user.                        |
+| `DELETE` | `/v1/users/:id`         | Delete a user.                      |
+| `GET`    | `/v1/users/:id/files`   | List the user's completed files.    |
+| `GET`    | `/v1/users/:id/uploads` | List the user's unfinished uploads. |
 
 ### Files
 
-| Method   | Path                    | Purpose |
-| -------- | ----------------------- | ------- |
-| `GET`    | `/v1/files/:id`         | Read completed file metadata. |
-| `PATCH`  | `/v1/files/:id`         | Rename a completed file. |
-| `DELETE` | `/v1/files/:id`         | Delete a logical file. |
-| `GET`    | `/v1/files/:id/content` | Download file contents. |
+| Method   | Path                    | Purpose                                  |
+| -------- | ----------------------- | ---------------------------------------- |
+| `GET`    | `/v1/files/:id`         | Read completed file metadata.            |
+| `PATCH`  | `/v1/files/:id`         | Rename a completed file.                 |
+| `DELETE` | `/v1/files/:id`         | Delete a logical file.                   |
+| `GET`    | `/v1/files/:id/content` | Download file contents.                  |
 | `HEAD`   | `/v1/files/:id/content` | Read download metadata without the body. |
 
 ### Uploads
 
-| Method   | Path                                        | Purpose |
-| -------- | ------------------------------------------- | ------- |
-| `POST`   | `/v1/files/upload`                          | Start a new-file upload. |
-| `POST`   | `/v1/files/:id/upload`                      | Start an atomic content replacement. |
-| `GET`    | `/v1/files/upload/:file_id`                 | Read upload progress. |
-| `PUT`    | `/v1/files/upload/:file_id/parts/:position` | Upload or replace a part. |
-| `DELETE` | `/v1/files/upload/:file_id/parts/:position` | Remove an uploaded part. |
-| `POST`   | `/v1/files/upload/:file_id/complete`        | Validate and complete an upload. |
-| `DELETE` | `/v1/files/upload/:file_id`                 | Cancel an unfinished upload. |
+| Method   | Path                                   | Purpose                              |
+| -------- | -------------------------------------- | ------------------------------------ |
+| `POST`   | `/v1/files/upload`                     | Start a new-file upload.             |
+| `POST`   | `/v1/files/:id/upload`                 | Start an atomic content replacement. |
+| `GET`    | `/v1/uploads/:file_id`                 | Read upload progress.                |
+| `PUT`    | `/v1/uploads/:file_id/parts/:position` | Upload or replace a part.            |
+| `DELETE` | `/v1/uploads/:file_id/parts/:position` | Remove an uploaded part.             |
+| `POST`   | `/v1/uploads/:file_id/complete`        | Validate and complete an upload.     |
+| `DELETE` | `/v1/uploads/:file_id`                 | Cancel an unfinished upload.         |
 
 ## Service
 
@@ -161,9 +161,9 @@ Returns `200 OK` when the service can accept requests.
 
 ```json
 {
-  "status": "available",
-  "version": "1.0.0",
-  "time": "2026-10-10T12:00:00Z"
+    "status": "available",
+    "version": "1.0.0",
+    "time": "2026-10-10T12:00:00Z"
 }
 ```
 
@@ -178,7 +178,7 @@ Content-Type: application/json
 
 ```json
 {
-  "name": "Kotik"
+    "name": "Kotik"
 }
 ```
 
@@ -186,10 +186,10 @@ Returns `201 Created`, a `Location` header, and the created user:
 
 ```json
 {
-  "user": {
-    "id": "baab6197-3e2d-4969-8492-247bbba900dc",
-    "name": "Kotik"
-  }
+    "user": {
+        "id": "baab6197-3e2d-4969-8492-247bbba900dc",
+        "name": "Kotik"
+    }
 }
 ```
 
@@ -228,19 +228,19 @@ Returns only files in `ready` status, ordered by name and ID.
 
 ```json
 {
-  "files": [
-    {
-      "id": "32f11d17-b1f5-4fb0-94ca-614903665dff",
-      "name": "movie.mov",
-      "file_type": "video/quicktime",
-      "owner_id": "baab6197-3e2d-4969-8492-247bbba900dc",
-      "status": "ready",
-      "size": 104857600
+    "files": [
+        {
+            "id": "32f11d17-b1f5-4fb0-94ca-614903665dff",
+            "name": "movie.mov",
+            "file_type": "video/quicktime",
+            "owner_id": "baab6197-3e2d-4969-8492-247bbba900dc",
+            "status": "ready",
+            "size": 104857600
+        }
+    ],
+    "pagination": {
+        "next_cursor": null
     }
-  ],
-  "pagination": {
-    "next_cursor": null
-  }
 }
 ```
 
@@ -273,7 +273,7 @@ Content-Type: application/json
 
 ```json
 {
-  "name": "holiday.mov"
+    "name": "holiday.mov"
 }
 ```
 
@@ -331,10 +331,10 @@ Idempotency-Key: client-generated-key
 
 ```json
 {
-  "owner_id": "baab6197-3e2d-4969-8492-247bbba900dc",
-  "name": "movie.mov",
-  "file_type": "video/quicktime",
-  "size": 104857600
+    "owner_id": "baab6197-3e2d-4969-8492-247bbba900dc",
+    "name": "movie.mov",
+    "file_type": "video/quicktime",
+    "size": 104857600
 }
 ```
 
@@ -346,16 +346,16 @@ endpoint, and an upload resource:
 
 ```json
 {
-  "upload": {
-    "file_id": "32f11d17-b1f5-4fb0-94ca-614903665dff",
-    "owner_id": "baab6197-3e2d-4969-8492-247bbba900dc",
-    "name": "movie.mov",
-    "file_type": "video/quicktime",
-    "status": "uploading",
-    "size": 104857600,
-    "received_size": 0,
-    "parts": []
-  }
+    "upload": {
+        "file_id": "32f11d17-b1f5-4fb0-94ca-614903665dff",
+        "owner_id": "baab6197-3e2d-4969-8492-247bbba900dc",
+        "name": "movie.mov",
+        "file_type": "video/quicktime",
+        "status": "uploading",
+        "size": 104857600,
+        "received_size": 0,
+        "parts": []
+    }
 }
 ```
 
@@ -370,8 +370,8 @@ Content-Type: application/json
 
 ```json
 {
-  "size": 125829120,
-  "file_type": "video/quicktime"
+    "size": 125829120,
+    "file_type": "video/quicktime"
 }
 ```
 
@@ -384,30 +384,30 @@ another attempt returns `409 Conflict`.
 ### Get upload progress
 
 ```http
-GET /v1/files/upload/:file_id
+GET /v1/uploads/:file_id
 ```
 
 ```json
 {
-  "upload": {
-    "file_id": "32f11d17-b1f5-4fb0-94ca-614903665dff",
-    "owner_id": "baab6197-3e2d-4969-8492-247bbba900dc",
-    "name": "movie.mov",
-    "file_type": "video/quicktime",
-    "status": "uploading",
-    "size": 104857600,
-    "received_size": 33554432,
-    "parts": [
-      {
-        "position": 0,
-        "size": 16777216
-      },
-      {
-        "position": 1,
-        "size": 16777216
-      }
-    ]
-  }
+    "upload": {
+        "file_id": "32f11d17-b1f5-4fb0-94ca-614903665dff",
+        "owner_id": "baab6197-3e2d-4969-8492-247bbba900dc",
+        "name": "movie.mov",
+        "file_type": "video/quicktime",
+        "status": "uploading",
+        "size": 104857600,
+        "received_size": 33554432,
+        "parts": [
+            {
+                "position": 0,
+                "size": 16777216
+            },
+            {
+                "position": 1,
+                "size": 16777216
+            }
+        ]
+    }
 }
 ```
 
@@ -416,7 +416,7 @@ Parts are always returned in ascending position order.
 ### Upload or replace a part
 
 ```http
-PUT /v1/files/upload/:file_id/parts/:position
+PUT /v1/uploads/:file_id/parts/:position
 Content-Type: application/octet-stream
 Content-Length: 16777216
 ```
@@ -430,10 +430,10 @@ part must not exceed the server's `BlobsMaxSize` limit, currently 16 MiB.
 
 ```json
 {
-  "part": {
-    "position": 0,
-    "size": 16777216
-  }
+    "part": {
+        "position": 0,
+        "size": 16777216
+    }
 }
 ```
 
@@ -443,7 +443,7 @@ replaced part.
 ### Remove a part
 
 ```http
-DELETE /v1/files/upload/:file_id/parts/:position
+DELETE /v1/uploads/:file_id/parts/:position
 ```
 
 Returns `204 No Content`. Removing a nonexistent position returns `404 Not
@@ -452,7 +452,7 @@ Found`. Removing a part does not renumber later positions.
 ### Complete an upload
 
 ```http
-POST /v1/files/upload/:file_id/complete
+POST /v1/uploads/:file_id/complete
 ```
 
 Completion succeeds only when:
@@ -475,7 +475,7 @@ upload returns the completed file.
 ### Cancel an upload
 
 ```http
-DELETE /v1/files/upload/:file_id
+DELETE /v1/uploads/:file_id
 ```
 
 Returns `204 No Content`. Canceling removes unfinished file metadata and makes

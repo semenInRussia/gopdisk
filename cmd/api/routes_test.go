@@ -735,6 +735,110 @@ func TestFilesUploadPostEndpoint(t *testing.T) {
 	})
 }
 
+func TestFilesUploadGetEndpoint(t *testing.T) {
+	const (
+		fileID  = "32f11d17-b1f5-4fb0-94ca-614903665dff"
+		ownerID = "baab6197-3e2d-4969-8492-247bbba900dc"
+	)
+	query := regexp.QuoteMeta(`
+		SELECT f.id, f.owner_id, f.name, f.filetype, f.status, f.size, fb.position, b.size
+		FROM files f
+		LEFT JOIN file_blobs fb ON fb.file_id = f.id
+		LEFT JOIN blobs b ON b.hash = fb.blob_hash
+		WHERE f.id = $1 AND f.status = $2
+		ORDER BY fb.position
+	`)
+	columns := []string{"id", "owner_id", "name", "filetype", "status", "file_size", "position", "blob_size"}
+
+	t.Run("returns upload progress with ordered parts", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectQuery(query).
+			WithArgs(data.FileID(fileID), data.FileStatusUploading).
+			WillReturnRows(sqlmock.NewRows(columns).
+				AddRow(fileID, ownerID, "movie.mov", "video/quicktime", data.FileStatusUploading, int64(40), int64(0), int64(16)).
+				AddRow(fileID, ownerID, "movie.mov", "video/quicktime", data.FileStatusUploading, int64(40), int64(1), int64(16)))
+
+		recorder := serveRequest(t, app, http.MethodGet, "/v1/uploads/"+fileID, nil)
+
+		assertJSONResponse(t, recorder, http.StatusOK)
+		response := decodeResponse[struct {
+			Upload data.Upload `json:"upload"`
+		}](t, recorder)
+		if response.Upload.FileID != data.FileID(fileID) {
+			t.Errorf("got file ID %q, expected %q", response.Upload.FileID, fileID)
+		}
+		if response.Upload.FileType != data.FileKind("video/quicktime") {
+			t.Errorf("got file type %q, expected %q", response.Upload.FileType, "video/quicktime")
+		}
+		if response.Upload.ReceivedSize != 32 {
+			t.Errorf("got received size %d, expected 32", response.Upload.ReceivedSize)
+		}
+		expectedParts := []data.UploadPart{{Position: 0, Size: 16}, {Position: 1, Size: 16}}
+		if len(response.Upload.Parts) != len(expectedParts) {
+			t.Fatalf("got %d parts, expected %d", len(response.Upload.Parts), len(expectedParts))
+		}
+		for i := range expectedParts {
+			if response.Upload.Parts[i] != expectedParts[i] {
+				t.Errorf("got part %d %+v, expected %+v", i, response.Upload.Parts[i], expectedParts[i])
+			}
+		}
+	})
+
+	t.Run("returns an empty parts array", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectQuery(query).
+			WithArgs(data.FileID(fileID), data.FileStatusUploading).
+			WillReturnRows(sqlmock.NewRows(columns).
+				AddRow(fileID, ownerID, "empty.txt", "text/plain", data.FileStatusUploading, int64(0), nil, nil))
+
+		recorder := serveRequest(t, app, http.MethodGet, "/v1/uploads/"+fileID, nil)
+
+		assertJSONResponse(t, recorder, http.StatusOK)
+		response := decodeResponse[struct {
+			Upload data.Upload `json:"upload"`
+		}](t, recorder)
+		if response.Upload.Parts == nil {
+			t.Fatal("got null parts, expected an empty array")
+		}
+		if len(response.Upload.Parts) != 0 {
+			t.Errorf("got %d parts, expected none", len(response.Upload.Parts))
+		}
+		if response.Upload.ReceivedSize != 0 {
+			t.Errorf("got received size %d, expected 0", response.Upload.ReceivedSize)
+		}
+	})
+
+	t.Run("returns not found for a missing or completed upload", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectQuery(query).
+			WithArgs(data.FileID(fileID), data.FileStatusUploading).
+			WillReturnRows(sqlmock.NewRows(columns))
+
+		recorder := serveRequest(t, app, http.MethodGet, "/v1/uploads/"+fileID, nil)
+
+		assertJSONResponse(t, recorder, http.StatusNotFound)
+	})
+
+	t.Run("rejects an invalid file ID", func(t *testing.T) {
+		app, _ := newTestApplication(t)
+
+		recorder := serveRequest(t, app, http.MethodGet, "/v1/uploads/not-a-uuid", nil)
+
+		assertJSONResponse(t, recorder, http.StatusBadRequest)
+	})
+
+	t.Run("returns server error on query failure", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectQuery(query).
+			WithArgs(data.FileID(fileID), data.FileStatusUploading).
+			WillReturnError(errors.New("select failed"))
+
+		recorder := serveRequest(t, app, http.MethodGet, "/v1/uploads/"+fileID, nil)
+
+		assertJSONResponse(t, recorder, http.StatusInternalServerError)
+	})
+}
+
 func TestFilesContentGetEndpoint(t *testing.T) {
 	const (
 		fileID  = "32f11d17-b1f5-4fb0-94ca-614903665dff"

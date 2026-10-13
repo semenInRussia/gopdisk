@@ -159,6 +159,29 @@ func (app *Application) filesUploadsPostHandler(w http.ResponseWriter, r *http.R
 	app.writeJSON(w, data, http.StatusOK, nil)
 }
 
+func (app *Application) filesUploadGetHandler(w http.ResponseWriter, r *http.Request) {
+	id, err := app.getUUIDParam(r, "file_id")
+	if err != nil {
+		app.badRequestErrorResponse(w, err.Error())
+		return
+	}
+
+	upload, err := app.storage.Files.GetUpload(r.Context(), data.FileID(id))
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrFileNotFound):
+			app.errorResponse(w, err.Error(), http.StatusNotFound)
+		default:
+			app.serverErrorResponse(w, err)
+		}
+		return
+	}
+
+	if err := app.writeJSON(w, Envelope{"upload": upload}, http.StatusOK, nil); err != nil {
+		app.serverErrorResponse(w, err)
+	}
+}
+
 func (app *Application) filesContentGetHandler(w http.ResponseWriter, r *http.Request) {
 	file, err := app.getFileByPathID(w, r)
 	if err != nil {

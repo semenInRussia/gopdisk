@@ -3,10 +3,12 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"gopherdisk/internal/validator"
 	"maps"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/julienschmidt/httprouter"
 )
 
@@ -78,6 +80,18 @@ func (app *Application) getIdParam(r *http.Request) (string, error) {
 	id := params.ByName("id")
 	if id == "" {
 		return "", errors.New("id is required, but not provided")
+	}
+	return id, nil
+}
+
+func (app *Application) getUUIDParam(r *http.Request, name string) (string, error) {
+	params := httprouter.ParamsFromContext(r.Context())
+	id := params.ByName(name)
+	if id == "" {
+		return "", fmt.Errorf("%s is required, but not provided", name)
+	}
+	if err := uuid.Validate(id); err != nil {
+		return "", fmt.Errorf("%s must be a valid UUID: %w", name, err)
 	}
 	return id, nil
 }
