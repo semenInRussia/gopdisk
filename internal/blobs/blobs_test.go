@@ -2,6 +2,7 @@ package blobs
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -21,10 +22,10 @@ func TestAddOneChunkReader(t *testing.T) {
 		t.Fatalf("cannot create blob storage: %v", err)
 	}
 
-	if _, err := bs.AddReader(bytes.NewReader(nil)); !errors.Is(err, io.EOF) {
+	if _, err := bs.AddReader(context.Background(), bytes.NewReader(nil)); !errors.Is(err, io.EOF) {
 		t.Fatalf("AddOneChunkReader(empty) returned %v, expected %v", err, io.EOF)
 	}
-	listed, err := bs.ListBlobs()
+	listed, err := bs.ListBlobs(context.Background())
 	if err != nil {
 		t.Fatalf("cannot list blobs after empty reader: %v", err)
 	}
@@ -33,11 +34,11 @@ func TestAddOneChunkReader(t *testing.T) {
 	}
 
 	for _, data := range [][]byte{[]byte("abcd")} {
-		blob, err := bs.AddReader(bytes.NewReader(data))
+		blob, err := bs.AddReader(context.Background(), bytes.NewReader(data))
 		if err != nil {
 			t.Fatalf("AddOneChunkReader(%q) returned error: %v", data, err)
 		}
-		stored, err := bs.ReadBlob(*blob)
+		stored, err := bs.ReadBlob(context.Background(), *blob)
 		if err != nil {
 			t.Fatalf("cannot read stored blob: %v", err)
 		}
@@ -46,11 +47,11 @@ func TestAddOneChunkReader(t *testing.T) {
 		}
 	}
 
-	if _, err := bs.AddData([]byte("abcde")); !errors.Is(err, ErrBlobOverflow) {
+	if _, err := bs.AddData(context.Background(), []byte("abcde")); !errors.Is(err, ErrBlobOverflow) {
 		t.Fatalf("AddOneChunk returned %v, expected %v", err, ErrBlobOverflow)
 	}
 	reader := bytes.NewReader([]byte("abcde"))
-	limited, err := bs.AddReader(reader)
+	limited, err := bs.AddReader(context.Background(), reader)
 	if err != nil {
 		t.Fatalf("AddOneChunkReader returned error for reader with remaining data: %v", err)
 	}
@@ -64,7 +65,7 @@ func TestAddOneChunkReader(t *testing.T) {
 	if !bytes.Equal(remaining, []byte("e")) {
 		t.Fatalf("got remaining data %q, expected %q", remaining, "e")
 	}
-	stored, err := bs.ReadBlob(*limited)
+	stored, err := bs.ReadBlob(context.Background(), *limited)
 	if err != nil {
 		t.Fatalf("cannot read limited blob: %v", err)
 	}
@@ -72,11 +73,11 @@ func TestAddOneChunkReader(t *testing.T) {
 		t.Fatalf("got stored data %q, expected %q", stored, "abcd")
 	}
 
-	fromBytes, err := bs.AddData([]byte("abcd"))
+	fromBytes, err := bs.AddData(context.Background(), []byte("abcd"))
 	if err != nil {
 		t.Fatalf("AddOneChunk returned error: %v", err)
 	}
-	fromReader, err := bs.AddReader(bytes.NewReader([]byte("abcd")))
+	fromReader, err := bs.AddReader(context.Background(), bytes.NewReader([]byte("abcd")))
 	if err != nil {
 		t.Fatalf("AddOneChunkReader returned error: %v", err)
 	}
@@ -97,8 +98,51 @@ func TestAddOneChunkReaderReturnsReaderErrors(t *testing.T) {
 	}
 	expectedErr := errors.New("reader failed")
 
-	if _, err := bs.AddReader(iotest.ErrReader(expectedErr)); !errors.Is(err, expectedErr) {
+	if _, err := bs.AddReader(context.Background(), iotest.ErrReader(expectedErr)); !errors.Is(err, expectedErr) {
 		t.Fatalf("AddOneChunkReader returned %v, expected %v", err, expectedErr)
+	}
+	assertNoTemporaryBlobs(t, bs.Path)
+}
+
+func TestBlobStorageOperationsUseCanceledContext(t *testing.T) {
+	bs, err := MakeBlobStorage(t.TempDir())
+	if err != nil {
+		t.Fatalf("cannot create blob storage: %v", err)
+	}
+	stored, err := bs.AddData(context.Background(), []byte("data"))
+	if err != nil {
+		t.Fatalf("cannot prepare blob: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := bs.AddData(ctx, []byte("other")); !errors.Is(err, context.Canceled) {
+		t.Errorf("AddData returned %v, expected %v", err, context.Canceled)
+	}
+	if _, err := bs.AddReader(ctx, bytes.NewReader([]byte("other"))); !errors.Is(err, context.Canceled) {
+		t.Errorf("AddReader returned %v, expected %v", err, context.Canceled)
+	}
+	if _, err := bs.ListBlobs(ctx); !errors.Is(err, context.Canceled) {
+		t.Errorf("ListBlobs returned %v, expected %v", err, context.Canceled)
+	}
+	if _, err := bs.ReadBlob(ctx, *stored); !errors.Is(err, context.Canceled) {
+		t.Errorf("ReadBlob returned %v, expected %v", err, context.Canceled)
+	}
+	if err := bs.DeleteBlob(ctx, *stored); !errors.Is(err, context.Canceled) {
+		t.Errorf("DeleteBlob returned %v, expected %v", err, context.Canceled)
+	}
+
+	dataCh, errCh := bs.ReadBlobs(ctx, []Blob{*stored})
+	if data, ok := <-dataCh; ok {
+		t.Errorf("ReadBlobs returned data %q for canceled context", data)
+	}
+	if err := <-errCh; !errors.Is(err, context.Canceled) {
+		t.Errorf("ReadBlobs returned %v, expected %v", err, context.Canceled)
+	}
+
+	if _, err := bs.ReadBlob(context.Background(), *stored); err != nil {
+		t.Fatalf("canceled DeleteBlob removed the blob: %v", err)
 	}
 	assertNoTemporaryBlobs(t, bs.Path)
 }
@@ -122,7 +166,7 @@ func TestReadBlobsReportsMissingBlobWithoutHanging(t *testing.T) {
 		t.Fatalf("cannot create blob storage: %v", err)
 	}
 
-	dataCh, errCh := bs.ReadBlobs([]Blob{
+	dataCh, errCh := bs.ReadBlobs(context.Background(), []Blob{
 		{Hash: "missing-blob", Size: 1},
 	})
 

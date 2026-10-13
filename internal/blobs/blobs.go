@@ -35,17 +35,24 @@ func MakeBlobStorage(path string) (*BlobStorage, error) {
 	return &s, err
 }
 
-func (bs *BlobStorage) AddData(data []byte) (*Blob, error) {
+func (bs *BlobStorage) AddData(ctx context.Context, data []byte) (*Blob, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if int64(len(data)) > BlobsMaxSize {
 		return nil, ErrBlobOverflow
 	}
-	return bs.AddReader(bytes.NewReader(data))
+	return bs.AddReader(ctx, bytes.NewReader(data))
 }
 
 // AddReader reads and stores at most one blob from reader, leaving any
 // remaining data unread. It returns io.EOF without storing a blob when the
 // reader has no data.
-func (bs *BlobStorage) AddReader(reader io.Reader) (*Blob, error) {
+func (bs *BlobStorage) AddReader(ctx context.Context, reader io.Reader) (*Blob, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	temporary, err := os.CreateTemp(bs.Path, ".blob-*")
 	if err != nil {
 		return nil, err
@@ -54,17 +61,26 @@ func (bs *BlobStorage) AddReader(reader io.Reader) (*Blob, error) {
 	defer os.Remove(temporary.Name())
 
 	hasher := sha256.New()
-	size, err := io.Copy(io.MultiWriter(temporary, hasher), io.LimitReader(reader, BlobsMaxSize))
+	size, err := io.Copy(
+		io.MultiWriter(temporary, hasher),
+		io.LimitReader(contextReader{ctx: ctx, reader: reader}, BlobsMaxSize),
+	)
 	if err != nil {
 		return nil, err
 	}
 	if size == 0 {
 		return nil, io.EOF
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := temporary.Chmod(0644); err != nil {
 		return nil, err
 	}
 	if err := temporary.Close(); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
@@ -76,11 +92,18 @@ func (bs *BlobStorage) AddReader(reader io.Reader) (*Blob, error) {
 	return &Blob{Hash: hash, Size: size}, nil
 }
 
-func (bs *BlobStorage) DeleteBlob(blob Blob) error {
+func (bs *BlobStorage) DeleteBlob(ctx context.Context, blob Blob) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return bs.deleteFile(blob.Hash)
 }
 
-func (bs *BlobStorage) ListBlobs() ([]Blob, error) {
+func (bs *BlobStorage) ListBlobs(ctx context.Context) ([]Blob, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	entries, err := os.ReadDir(bs.Path)
 	if err != nil {
 		return nil, err
@@ -89,6 +112,9 @@ func (bs *BlobStorage) ListBlobs() ([]Blob, error) {
 	blobs := make([]Blob, 0, len(entries))
 
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if !entry.Type().IsRegular() {
 			continue
 		}
@@ -107,11 +133,7 @@ func (bs *BlobStorage) ListBlobs() ([]Blob, error) {
 	return blobs, nil
 }
 
-func (bs *BlobStorage) ReadBlobs(blobs []Blob) (<-chan []byte, <-chan error) {
-	return bs.ReadBlobsContext(context.Background(), blobs)
-}
-
-func (bs *BlobStorage) ReadBlobsContext(ctx context.Context, blobs []Blob) (<-chan []byte, <-chan error) {
+func (bs *BlobStorage) ReadBlobs(ctx context.Context, blobs []Blob) (<-chan []byte, <-chan error) {
 	data := make(chan []byte, 1)
 	errCh := make(chan error, 1)
 
@@ -125,7 +147,7 @@ func (bs *BlobStorage) ReadBlobsContext(ctx context.Context, blobs []Blob) (<-ch
 				return
 			}
 
-			d, err := bs.ReadBlob(bl)
+			d, err := bs.ReadBlob(ctx, bl)
 			if err != nil {
 				errCh <- err
 				return
@@ -143,7 +165,11 @@ func (bs *BlobStorage) ReadBlobsContext(ctx context.Context, blobs []Blob) (<-ch
 	return data, errCh
 }
 
-func (bs *BlobStorage) ReadBlob(blob Blob) ([]byte, error) {
+func (bs *BlobStorage) ReadBlob(ctx context.Context, blob Blob) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	file, err := bs.openFile(blob.Hash, os.O_RDONLY, 0644)
 	if err != nil {
 		return nil, err
@@ -151,7 +177,7 @@ func (bs *BlobStorage) ReadBlob(blob Blob) ([]byte, error) {
 	defer file.Close()
 
 	res := make([]byte, blob.Size)
-	_, err = io.ReadFull(file, res)
+	_, err = io.ReadFull(contextReader{ctx: ctx, reader: file}, res)
 	if err != nil {
 		return nil, err
 	}
@@ -169,4 +195,16 @@ func (bs *BlobStorage) openFile(hash string, flag int, perm os.FileMode) (*os.Fi
 func (bs *BlobStorage) deleteFile(hash string) error {
 	path := filepath.Join(bs.Path, hash)
 	return os.Remove(path)
+}
+
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r contextReader) Read(data []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(data)
 }

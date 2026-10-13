@@ -336,6 +336,42 @@ func TestNewAddDataCommitAndRead(t *testing.T) {
 	}
 }
 
+func TestAddDataBackPreservesOrderAcrossWorkerBatches(t *testing.T) {
+	previousMaxPartSize := blobs.BlobsMaxSize
+	blobs.BlobsMaxSize = 1
+	t.Cleanup(func() { blobs.BlobsMaxSize = previousMaxPartSize })
+
+	s := getStorage(t)
+	user, err := s.Users.New(context.Background(), "Concurrent data user")
+	if err != nil {
+		t.Fatalf("cannot add user: %v", err)
+	}
+
+	data := []byte("abcdefghij")
+	file, err := s.Files.New(context.Background(), user.ID, "concurrent-data", "TXT", int64(len(data)))
+	if err != nil {
+		t.Fatalf("cannot create file: %v", err)
+	}
+	stored, err := s.Files.AddDataBack(context.Background(), file.ID, data)
+	if err != nil {
+		t.Fatalf("cannot add data: %v", err)
+	}
+	if len(stored) != len(data) {
+		t.Fatalf("stored %d blobs, expected %d", len(stored), len(data))
+	}
+	if err := s.Files.Commit(context.Background(), file.ID); err != nil {
+		t.Fatalf("cannot commit file: %v", err)
+	}
+
+	got, err := readAll(t, s, file.ID)
+	if err != nil {
+		t.Fatalf("cannot read file: %v", err)
+	}
+	if !bytes.Equal(got, data) {
+		t.Fatalf("got %q, expected %q", got, data)
+	}
+}
+
 func TestCommitRequiresDeclaredSize(t *testing.T) {
 	s := getStorage(t)
 	user, err := s.Users.New(context.Background(), "Kotik")
@@ -462,7 +498,7 @@ func TestAddReaderAndAddBlob(t *testing.T) {
 	if len(readerBlobs) != 1 {
 		t.Fatalf("got %d reader blobs, expected 1", len(readerBlobs))
 	}
-	lastBlob, err := s.bs.AddData([]byte("efg"))
+	lastBlob, err := s.bs.AddData(context.Background(), []byte("efg"))
 	if err != nil {
 		t.Fatalf("cannot store standalone blob: %v", err)
 	}
@@ -506,7 +542,7 @@ func TestPositionedAddsReplaceAndPreserveOrder(t *testing.T) {
 	if _, err := s.Files.AddDataBack(context.Background(), file.ID, []byte("dd")); err != nil {
 		t.Fatalf("cannot append data after a position gap: %v", err)
 	}
-	positionOne, err := s.bs.AddData([]byte("bb"))
+	positionOne, err := s.bs.AddData(context.Background(), []byte("bb"))
 	if err != nil {
 		t.Fatalf("cannot store standalone blob: %v", err)
 	}
@@ -550,7 +586,7 @@ func TestPositionedAddsValidatePositionAndSize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot create file: %v", err)
 	}
-	blob, err := s.bs.AddData([]byte("data"))
+	blob, err := s.bs.AddData(context.Background(), []byte("data"))
 	if err != nil {
 		t.Fatalf("cannot store standalone blob: %v", err)
 	}
@@ -710,7 +746,7 @@ func TestRemoveBlobRemovesOnlyRequestedUploadPosition(t *testing.T) {
 		t.Errorf("got received size %d, expected 2", upload.ReceivedSize)
 	}
 
-	storedBlobs, err := s.bs.ListBlobs()
+	storedBlobs, err := s.bs.ListBlobs(context.Background())
 	if err != nil {
 		t.Fatalf("cannot list physical blobs: %v", err)
 	}
@@ -750,7 +786,7 @@ func TestCancelUploadRemovesOnlyUnfinishedMetadata(t *testing.T) {
 	if _, err := s.Files.GetBlobs(context.Background(), upload.ID); !errors.Is(err, ErrFileNotFound) {
 		t.Fatalf("getting canceled upload blobs returned %v, expected %v", err, ErrFileNotFound)
 	}
-	storedBlobs, err := s.bs.ListBlobs()
+	storedBlobs, err := s.bs.ListBlobs(context.Background())
 	if err != nil {
 		t.Fatalf("cannot list physical blobs: %v", err)
 	}

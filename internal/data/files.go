@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"gopherdisk/internal/blobs"
 	"io"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -260,16 +261,63 @@ func (s *FileModel) AddDataBack(ctx context.Context, fileID FileID, data []byte)
 		return nil, err
 	}
 
-	stored := make([]blobs.Blob, 0, s.blobCountForSize(int64(len(data))))
-	for _, chunk := range s.splitIntoBlobChunks(data) {
-		if err := ctx.Err(); err != nil {
-			return nil, err
+	type job struct {
+		position int
+		chunk    []byte
+	}
+
+	const nWorkers = 4
+
+	jobs := make(chan job, nWorkers)
+	chunks := s.splitIntoBlobChunks(data)
+	stored := make([]blobs.Blob, len(chunks))
+
+	workerCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var errOnce sync.Once
+	var firstErr error
+	fail := func(err error) {
+		if err == nil {
+			return
 		}
-		blob, err := s.bs.AddData(chunk)
-		if err != nil {
-			return nil, err
+		errOnce.Do(func() {
+			firstErr = err
+			cancel()
+		})
+	}
+
+	var wg sync.WaitGroup
+	for range nWorkers {
+		wg.Go(func() {
+			for job := range jobs {
+				blob, err := s.bs.AddData(workerCtx, job.chunk)
+				if err != nil {
+					fail(err)
+					return
+				}
+				stored[job.position] = *blob
+			}
+		})
+	}
+
+loop:
+	for position, chunk := range chunks {
+		select {
+		case jobs <- job{position: position, chunk: chunk}:
+		case <-workerCtx.Done():
+			fail(workerCtx.Err())
+			break loop
 		}
-		stored = append(stored, *blob)
+	}
+	close(jobs)
+	wg.Wait()
+
+	if err := workerCtx.Err(); err != nil {
+		fail(err)
+	}
+	if firstErr != nil {
+		return nil, firstErr
 	}
 	if err := s.appendBlobs(ctx, fileID, stored); err != nil {
 		return nil, err
@@ -279,10 +327,9 @@ func (s *FileModel) AddDataBack(ctx context.Context, fileID FileID, data []byte)
 
 // AddReaderBack stores reader contents as an ordered sequence of blobs and appends it to file.
 func (s *FileModel) AddReaderBack(ctx context.Context, fileID FileID, reader io.Reader) ([]blobs.Blob, error) {
-	reader = contextReader{ctx: ctx, reader: reader}
 	stored := make([]blobs.Blob, 0)
 	for {
-		blob, err := s.bs.AddReader(reader)
+		blob, err := s.bs.AddReader(ctx, reader)
 		if errors.Is(err, io.EOF) {
 			break
 		}
@@ -325,7 +372,7 @@ func (s *FileModel) AddData(ctx context.Context, fileID FileID, position int, da
 		return nil, err
 	}
 
-	stored, err := s.bs.AddData(data)
+	stored, err := s.bs.AddData(ctx, data)
 	if err != nil {
 		return nil, err
 	}
@@ -345,8 +392,7 @@ func (s *FileModel) AddReader(ctx context.Context, fileID FileID, position int, 
 		return nil, err
 	}
 
-	limited := io.LimitReader(contextReader{ctx: ctx, reader: reader}, blobs.BlobsMaxSize)
-	stored, err := s.bs.AddReader(limited)
+	stored, err := s.bs.AddReader(ctx, reader)
 	if err != nil {
 		return nil, err
 	}
@@ -548,7 +594,7 @@ func (s *FileModel) Read(ctx context.Context, fileID FileID) (<-chan []byte, <-c
 	if err != nil {
 		return closedReadChannels(err)
 	}
-	return s.bs.ReadBlobsContext(ctx, fileBlobs)
+	return s.bs.ReadBlobs(ctx, fileBlobs)
 }
 
 func (s *Storage) IsBelongsToUser(ctx context.Context, fileID FileID, ownerID UserID) (bool, error) {
@@ -658,18 +704,6 @@ func (s *FileModel) putBlob(ctx context.Context, fileID FileID, position int, bl
 		return err
 	}
 	return tx.Commit()
-}
-
-type contextReader struct {
-	ctx    context.Context
-	reader io.Reader
-}
-
-func (r contextReader) Read(data []byte) (int, error) {
-	if err := r.ctx.Err(); err != nil {
-		return 0, err
-	}
-	return r.reader.Read(data)
 }
 
 func closedReadChannels(err error) (<-chan []byte, <-chan error) {

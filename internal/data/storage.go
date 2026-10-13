@@ -65,7 +65,7 @@ func (s *Storage) CollectGarbageBlobs(ctx context.Context) (int, error) {
 		if err != nil {
 			return 0, err
 		}
-		err = s.bs.DeleteBlob(blob)
+		err = s.bs.DeleteBlob(ctx, blob)
 		if err != nil {
 			return cnt, err
 		}
@@ -81,7 +81,7 @@ func (s *Storage) CollectGarbageBlobs(ctx context.Context) (int, error) {
 		return cnt, err
 	}
 
-	storedBlobs, err := s.bs.ListBlobs()
+	storedBlobs, err := s.bs.ListBlobs(ctx)
 	if err != nil {
 		return cnt, err
 	}
@@ -91,7 +91,7 @@ func (s *Storage) CollectGarbageBlobs(ctx context.Context) (int, error) {
 			continue
 		}
 
-		if err := s.bs.DeleteBlob(blob); err != nil {
+		if err := s.bs.DeleteBlob(ctx, blob); err != nil {
 			return cnt, err
 		}
 		cnt++
