@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"gopherdisk/internal/blobs"
+	"gopherdisk/internal/validator"
 	"io"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -64,6 +66,30 @@ type Upload struct {
 type FileModel struct {
 	bs *blobs.BlobStorage
 	db *sql.DB
+}
+
+func ValidateFile(v *validator.Validator, file File) {
+	ValidateFileOwnerID(v, file.OwnerID)
+	ValidateFileName(v, file.Name)
+	ValidateFileType(v, file.Type)
+	v.Check("size", file.Size >= 0, "must not be negative")
+}
+
+func ValidateFileOwnerID(v *validator.Validator, ownerID UserID) {
+	value := string(ownerID)
+	v.Check("owner_id", value != "", "must be provided")
+	v.Check("owner_id", uuid.Validate(value) == nil, "must be a valid UUID")
+}
+
+func ValidateFileName(v *validator.Validator, name string) {
+	v.Check("name", strings.TrimSpace(name) != "", "must be provided")
+	v.Check("name", validator.RuneCount(name) <= 500, "must not be more than 500 characters long")
+}
+
+func ValidateFileType(v *validator.Validator, fileType FileType) {
+	value := string(fileType)
+	v.Check("type", strings.TrimSpace(value) != "", "must be provided")
+	v.Check("type", validator.RuneCount(value) <= 255, "must not be more than 255 characters long")
 }
 
 func GenerateFileID() FileID { return FileID(uuid.New().String()) }

@@ -864,6 +864,34 @@ func TestFilesUploadPostEndpoint(t *testing.T) {
 		assertJSONResponse(t, recorder, http.StatusBadRequest)
 	})
 
+	validationTests := []struct {
+		name  string
+		body  string
+		field string
+	}{
+		{name: "missing owner", body: `{"name":"movie.mov","type":"MOV","size":1024}`, field: "owner_id"},
+		{name: "invalid owner", body: `{"owner_id":"invalid","name":"movie.mov","type":"MOV","size":1024}`, field: "owner_id"},
+		{name: "missing name", body: `{"owner_id":"` + ownerID + `","type":"MOV","size":1024}`, field: "name"},
+		{name: "missing type", body: `{"owner_id":"` + ownerID + `","name":"movie.mov","size":1024}`, field: "type"},
+		{name: "negative size", body: `{"owner_id":"` + ownerID + `","name":"movie.mov","type":"MOV","size":-1}`, field: "size"},
+	}
+
+	for _, tt := range validationTests {
+		t.Run("rejects "+tt.name, func(t *testing.T) {
+			app, _ := newTestApplication(t)
+
+			recorder := serveRequest(t, app, http.MethodPost, "/v1/files/upload", []byte(tt.body))
+
+			assertJSONResponse(t, recorder, http.StatusUnprocessableEntity)
+			response := decodeResponse[struct {
+				Error map[string]string `json:"error"`
+			}](t, recorder)
+			if response.Error[tt.field] == "" {
+				t.Errorf("expected validation error for %q, got %v", tt.field, response.Error)
+			}
+		})
+	}
+
 	t.Run("returns server error on insert failure", func(t *testing.T) {
 		app, mock := newTestApplication(t)
 		mock.ExpectQuery(query).WillReturnError(errors.New("insert failed"))

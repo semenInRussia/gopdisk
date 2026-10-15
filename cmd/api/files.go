@@ -149,6 +149,13 @@ func (app *Application) filesUploadsPostHandler(w http.ResponseWriter, r *http.R
 		Size:    input.Size,
 	}
 
+	v := validator.New()
+	data.ValidateFile(v, file)
+	if !v.IsValid() {
+		app.writeValidatorErrors(w, v)
+		return
+	}
+
 	err = app.storage.Files.Insert(r.Context(), &file)
 
 	if err != nil {
@@ -158,7 +165,9 @@ func (app *Application) filesUploadsPostHandler(w http.ResponseWriter, r *http.R
 
 	data := Envelope{"file": file}
 
-	app.writeJSON(w, data, http.StatusOK, nil)
+	if err := app.writeJSON(w, data, http.StatusOK, nil); err != nil {
+		app.serverErrorResponse(w, err)
+	}
 }
 
 func (app *Application) uploadsGetHandler(w http.ResponseWriter, r *http.Request) {
