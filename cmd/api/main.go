@@ -106,6 +106,8 @@ func main() {
 
 	flag.Parse()
 
+	blobs.BlobsMaxSize = cfg.maxBlobSize
+
 	logger := log.New(os.Stdout, "", log.Ldate|log.Ltime)
 
 	db, err := database.Open(context.Background(), cfg.storage.dbURL)
