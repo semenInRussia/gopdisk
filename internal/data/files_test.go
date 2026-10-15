@@ -274,7 +274,7 @@ func TestUploadAndRead(t *testing.T) {
 	}
 }
 
-func TestNewAddDataCommitAndRead(t *testing.T) {
+func TestNewAddDataCompleteAndRead(t *testing.T) {
 	previousMaxPartSize := blobs.BlobsMaxSize
 	blobs.BlobsMaxSize = 4
 	t.Cleanup(func() {
@@ -307,8 +307,8 @@ func TestNewAddDataCommitAndRead(t *testing.T) {
 			t.Fatalf("cannot add data %d: %v", i, err)
 		}
 	}
-	if err := s.Files.Commit(context.Background(), file.ID); err != nil {
-		t.Fatalf("cannot commit file: %v", err)
+	if err := s.Files.Complete(context.Background(), file.ID); err != nil {
+		t.Fatalf("cannot complete file: %v", err)
 	}
 	got, err := readAll(t, s, file.ID)
 	if err != nil {
@@ -324,7 +324,7 @@ func TestNewAddDataCommitAndRead(t *testing.T) {
 	}
 	fileBlobs, err = s.Files.GetBlobs(context.Background(), file.ID)
 	if err != nil {
-		t.Fatalf("cannot get committed file blobs: %v", err)
+		t.Fatalf("cannot get completed file blobs: %v", err)
 	}
 	if loaded.Size != int64(len("hello-world")) || len(fileBlobs) != 3 {
 		t.Fatalf("got size %d and %d blobs, expected size 11 and 3 blobs", loaded.Size, len(fileBlobs))
@@ -359,8 +359,8 @@ func TestAddDataBackPreservesOrderAcrossWorkerBatches(t *testing.T) {
 	if len(stored) != len(data) {
 		t.Fatalf("stored %d blobs, expected %d", len(stored), len(data))
 	}
-	if err := s.Files.Commit(context.Background(), file.ID); err != nil {
-		t.Fatalf("cannot commit file: %v", err)
+	if err := s.Files.Complete(context.Background(), file.ID); err != nil {
+		t.Fatalf("cannot complete file: %v", err)
 	}
 
 	got, err := readAll(t, s, file.ID)
@@ -372,7 +372,7 @@ func TestAddDataBackPreservesOrderAcrossWorkerBatches(t *testing.T) {
 	}
 }
 
-func TestCommitRequiresDeclaredSize(t *testing.T) {
+func TestCompleteRequiresDeclaredSize(t *testing.T) {
 	s := getStorage(t)
 	user, err := s.Users.New(context.Background(), "Kotik")
 	if err != nil {
@@ -385,13 +385,13 @@ func TestCommitRequiresDeclaredSize(t *testing.T) {
 	if _, err := s.Files.AddDataBack(context.Background(), file.ID, []byte("four")); err != nil {
 		t.Fatalf("cannot add data: %v", err)
 	}
-	if err := s.Files.Commit(context.Background(), file.ID); !errors.Is(err, ErrEarlyCommit) {
-		t.Fatalf("got error %v, expected %v", err, ErrEarlyCommit)
+	if err := s.Files.Complete(context.Background(), file.ID); !errors.Is(err, ErrEarlyComplete) {
+		t.Fatalf("got error %v, expected %v", err, ErrEarlyComplete)
 	}
 	if _, err := s.Files.AddDataBack(context.Background(), file.ID, []byte("!")); err != nil {
 		t.Fatalf("cannot add remaining data: %v", err)
 	}
-	if err := s.Files.Commit(context.Background(), file.ID); err != nil {
+	if err := s.Files.Complete(context.Background(), file.ID); err != nil {
 		t.Fatalf("cannot commit complete file: %v", err)
 	}
 }
@@ -505,8 +505,8 @@ func TestAddReaderAndAddBlob(t *testing.T) {
 	if err := s.Files.AddBlobBack(context.Background(), file.ID, *lastBlob); err != nil {
 		t.Fatalf("cannot append blob: %v", err)
 	}
-	if err := s.Files.Commit(context.Background(), file.ID); err != nil {
-		t.Fatalf("cannot commit file: %v", err)
+	if err := s.Files.Complete(context.Background(), file.ID); err != nil {
+		t.Fatalf("cannot complete file: %v", err)
 	}
 
 	got, err := readAll(t, s, file.ID)
@@ -560,8 +560,8 @@ func TestPositionedAddsReplaceAndPreserveOrder(t *testing.T) {
 	if len(fileBlobs) != 4 {
 		t.Fatalf("got %d blobs, expected 4", len(fileBlobs))
 	}
-	if err := s.Files.Commit(context.Background(), file.ID); err != nil {
-		t.Fatalf("cannot commit file: %v", err)
+	if err := s.Files.Complete(context.Background(), file.ID); err != nil {
+		t.Fatalf("cannot complete file: %v", err)
 	}
 	got, err := readAll(t, s, file.ID)
 	if err != nil {
@@ -663,7 +663,7 @@ func TestPositionedAddsCanRunConcurrently(t *testing.T) {
 		}
 	}
 
-	if err := s.Files.Commit(context.Background(), file.ID); err != nil {
+	if err := s.Files.Complete(context.Background(), file.ID); err != nil {
 		t.Fatalf("cannot commit concurrent upload: %v", err)
 	}
 	got, err := readAll(t, s, file.ID)
@@ -698,8 +698,8 @@ func TestValidateUploadParts(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := validateUploadParts(tt.declaredSize, tt.parts)
-			if tt.wantErr && !errors.Is(err, ErrEarlyCommit) {
-				t.Fatalf("got error %v, expected %v", err, ErrEarlyCommit)
+			if tt.wantErr && !errors.Is(err, ErrEarlyComplete) {
+				t.Fatalf("got error %v, expected %v", err, ErrEarlyComplete)
 			}
 			if !tt.wantErr && err != nil {
 				t.Fatalf("unexpected validation error: %v", err)
@@ -909,7 +909,7 @@ func TestDelete(t *testing.T) {
 	}
 }
 
-func TestAddDataRejectsCommittedFile(t *testing.T) {
+func TestAddDataRejectsCompletedFile(t *testing.T) {
 	s := getStorage(t)
 	kotik, err := s.Users.New(context.Background(), "Kotik")
 	if err != nil {
@@ -933,14 +933,14 @@ func TestAddDataRejectsCommittedFile(t *testing.T) {
 	}
 	loaded, err := s.Files.Get(context.Background(), file.ID)
 	if err != nil {
-		t.Fatalf("cannot load committed file: %v", err)
+		t.Fatalf("cannot load completed file: %v", err)
 	}
 	fileBlobs, err := s.Files.GetBlobs(context.Background(), file.ID)
 	if err != nil {
-		t.Fatalf("cannot get committed file blobs: %v", err)
+		t.Fatalf("cannot get completed file blobs: %v", err)
 	}
 	if loaded.Size != int64(len("data")) || len(fileBlobs) != 1 {
-		t.Fatalf("committed file changed after rejected add: %+v", loaded)
+		t.Fatalf("completed file changed after rejected add: %+v", loaded)
 	}
 }
 

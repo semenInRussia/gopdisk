@@ -188,7 +188,9 @@ func (app *Application) uploadsGetHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := app.writeJSON(w, Envelope{"upload": upload}, http.StatusOK, nil); err != nil {
+	data := Envelope{"upload": upload}
+	err = app.writeJSON(w, data, http.StatusOK, nil)
+	if err != nil {
 		app.serverErrorResponse(w, err)
 	}
 }
@@ -356,14 +358,18 @@ func (app *Application) uploadsCompletePostHandler(w http.ResponseWriter, r *htt
 	}
 
 	id := data.FileID(fileID)
-	if err := app.storage.Files.Commit(r.Context(), id); err != nil {
+	if err := app.storage.Files.Complete(r.Context(), id); err != nil {
 		switch {
-		case errors.Is(err, data.ErrEarlyCommit):
+		case errors.Is(err, data.ErrEarlyComplete):
 			app.errorResponse(w, err.Error(), http.StatusConflict)
 		case errors.Is(err, data.ErrFileNotFound):
 			file, getErr := app.storage.Files.Get(r.Context(), id)
 			if getErr == nil {
-				if err := app.writeJSON(w, Envelope{"file": file}, http.StatusOK, nil); err != nil {
+				data := Envelope{
+					"file": file,
+				}
+				err := app.writeJSON(w, data, http.StatusOK, nil)
+				if err != nil {
 					app.serverErrorResponse(w, err)
 				}
 				return
@@ -384,7 +390,9 @@ func (app *Application) uploadsCompletePostHandler(w http.ResponseWriter, r *htt
 		app.serverErrorResponse(w, err)
 		return
 	}
-	if err := app.writeJSON(w, Envelope{"file": file}, http.StatusOK, nil); err != nil {
+
+	err = app.writeJSON(w, Envelope{"file": file}, http.StatusOK, nil)
+	if err != nil {
 		app.serverErrorResponse(w, err)
 	}
 }

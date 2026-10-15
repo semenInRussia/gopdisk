@@ -21,7 +21,7 @@ type FileType string
 
 var (
 	ErrBlobNotFound    = errors.New("cannot find a blob")
-	ErrEarlyCommit     = errors.New("cannot commit file before all data is added")
+	ErrEarlyComplete   = errors.New("cannot complete file before all data is added")
 	ErrFileNotFound    = errors.New("cannot find a file")
 	ErrInvalidPosition = errors.New("position must not be negative")
 	ErrInvalidSize     = errors.New("size must not be negative")
@@ -113,7 +113,7 @@ func (s *FileModel) InsertWithStatus(ctx context.Context, file *File) error {
 	return handleStorageDatabaseError(err)
 }
 
-// New constructs and inserts an empty file that can receive blobs before Commit.
+// New constructs and inserts an empty file that can receive blobs before Complete.
 func (s *FileModel) New(ctx context.Context, ownerID UserID, name string, fileType FileType, size int64) (*File, error) {
 	file := File{
 		ID: GenerateFileID(), Name: name, Type: fileType, OwnerID: ownerID, Size: size,
@@ -247,7 +247,7 @@ func (s *FileModel) GetBlobs(ctx context.Context, fileID FileID) ([]blobs.Blob, 
 	return fileBlobs, nil
 }
 
-// UploadData is a shortcut for New, AddDataBack, and Commit.
+// UploadData is a shortcut for New, AddDataBack, and Complete.
 func (s *FileModel) UploadData(ctx context.Context, ownerID UserID, name string, fileType FileType, data []byte) (*File, error) {
 	file, err := s.New(ctx, ownerID, name, fileType, int64(len(data)))
 	if err != nil {
@@ -257,14 +257,14 @@ func (s *FileModel) UploadData(ctx context.Context, ownerID UserID, name string,
 		_ = s.Delete(context.WithoutCancel(ctx), file.ID)
 		return nil, err
 	}
-	if err := s.Commit(ctx, file.ID); err != nil {
+	if err := s.Complete(ctx, file.ID); err != nil {
 		_ = s.Delete(context.WithoutCancel(ctx), file.ID)
 		return nil, err
 	}
 	return s.Get(ctx, file.ID)
 }
 
-// UploadReader is a shortcut for New, AddReaderBack, and Commit.
+// UploadReader is a shortcut for New, AddReaderBack, and Complete.
 func (s *FileModel) UploadReader(ctx context.Context, ownerID UserID, name string, fileType FileType, reader io.Reader, size int64) (*File, error) {
 	file, err := s.New(ctx, ownerID, name, fileType, size)
 	if err != nil {
@@ -274,7 +274,7 @@ func (s *FileModel) UploadReader(ctx context.Context, ownerID UserID, name strin
 		_ = s.Delete(context.WithoutCancel(ctx), file.ID)
 		return nil, err
 	}
-	if err := s.Commit(ctx, file.ID); err != nil {
+	if err := s.Complete(ctx, file.ID); err != nil {
 		_ = s.Delete(context.WithoutCancel(ctx), file.ID)
 		return nil, err
 	}
@@ -479,8 +479,8 @@ func (s *FileModel) RemoveBlob(ctx context.Context, fileID FileID, position int)
 	return tx.Commit()
 }
 
-// Commit validates an upload and makes it visible to regular read and list operations.
-func (s *FileModel) Commit(ctx context.Context, fileID FileID) error {
+// Complete validates an upload and makes it visible to regular read and list operations.
+func (s *FileModel) Complete(ctx context.Context, fileID FileID) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -539,18 +539,18 @@ func validateUploadParts(declaredSize int64, parts []UploadPart) error {
 	var storedSize int64
 	for i, part := range parts {
 		if part.Position != i {
-			return fmt.Errorf("%w: expected part at position %d, got %d", ErrEarlyCommit, i, part.Position)
+			return fmt.Errorf("%w: expected part at position %d, got %d", ErrEarlyComplete, i, part.Position)
 		}
 		if i < len(parts)-1 && part.Size != blobs.BlobsMaxSize {
-			return fmt.Errorf("%w: part %d has size %d, expected %d", ErrEarlyCommit, part.Position, part.Size, blobs.BlobsMaxSize)
+			return fmt.Errorf("%w: part %d has size %d, expected %d", ErrEarlyComplete, part.Position, part.Size, blobs.BlobsMaxSize)
 		}
 		if i == len(parts)-1 && part.Size > blobs.BlobsMaxSize {
-			return fmt.Errorf("%w: final part has size %d, maximum is %d", ErrEarlyCommit, part.Size, blobs.BlobsMaxSize)
+			return fmt.Errorf("%w: final part has size %d, maximum is %d", ErrEarlyComplete, part.Size, blobs.BlobsMaxSize)
 		}
 		storedSize += part.Size
 	}
 	if storedSize != declaredSize {
-		return fmt.Errorf("%w: received %d of %d bytes", ErrEarlyCommit, storedSize, declaredSize)
+		return fmt.Errorf("%w: received %d of %d bytes", ErrEarlyComplete, storedSize, declaredSize)
 	}
 	return nil
 }
