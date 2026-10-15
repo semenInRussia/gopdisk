@@ -31,7 +31,7 @@ func (app *Application) usersPostHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	user, token, err := app.storage.RegisterUser(r.Context(), input.Name, input.Email, input.Password)
+	user, token, err := app.storage.Users.Register(r.Context(), input.Name, input.Email, input.Password)
 	if err != nil {
 		if errors.Is(err, data.ErrDuplicateEmail) {
 			v.AddError("email", "a user with this email address already exists")
@@ -78,7 +78,7 @@ func (app *Application) usersActivatedPutHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	user, err := app.storage.ActivateUser(r.Context(), input.TokenPlaintext)
+	user, err := app.storage.Users.Activate(r.Context(), input.TokenPlaintext)
 	if err != nil {
 		if errors.Is(err, data.ErrInvalidToken) {
 			v.AddError("token", "is invalid or has expired")

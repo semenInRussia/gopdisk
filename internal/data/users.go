@@ -2,11 +2,13 @@ package data
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"gopherdisk/internal/validator"
 
@@ -53,6 +55,78 @@ func (m UserModel) Insert(ctx context.Context, user User) error {
 	return insertUser(ctx, m.db, user)
 }
 
+func (m UserModel) Register(ctx context.Context, name, email, plaintextPassword string) (*User, *Token, error) {
+	user := User{
+		ID:    GenerateUserID(),
+		Name:  name,
+		Email: NormalizeEmail(email),
+	}
+	if err := user.Password.Set(plaintextPassword); err != nil {
+		return nil, nil, err
+	}
+
+	token, err := GenerateToken(user.ID, 3*24*time.Hour, ScopeActivation)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	tx, err := m.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback()
+
+	if err := insertUser(ctx, tx, user); err != nil {
+		return nil, nil, err
+	}
+	if err := insertToken(ctx, tx, *token); err != nil {
+		return nil, nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, nil, err
+	}
+
+	return &user, token, nil
+}
+
+func (m UserModel) Activate(ctx context.Context, tokenPlaintext string) (*User, error) {
+	tokenHash := sha256.Sum256([]byte(tokenPlaintext))
+
+	tx, err := m.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	row := tx.QueryRowContext(ctx, `
+		SELECT u.id, u.name, u.email, u.password_hash, u.activated
+		FROM users u
+		INNER JOIN tokens t ON t.user_id = u.id
+		WHERE t.hash = $1 AND t.scope = $2 AND t.expiry > now()
+		FOR UPDATE OF u`, tokenHash[:], ScopeActivation)
+
+	user, err := scanUser(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrInvalidToken
+		}
+		return nil, err
+	}
+
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET activated = TRUE WHERE id = $1`, user.ID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM tokens WHERE scope = $1 AND user_id = $2`, ScopeActivation, user.ID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	user.Activated = true
+	return user, nil
+}
+
 func insertUser(ctx context.Context, db dbExecutor, user User) error {
 	_, err := db.ExecContext(ctx, `
 		INSERT INTO users (id, name, email, password_hash, activated)
@@ -70,7 +144,7 @@ func insertUser(ctx context.Context, db dbExecutor, user User) error {
 }
 
 // New creates an internal user with an unusable password. API registrations
-// must use Storage.RegisterUser so that an activation token is also created.
+// must use UserModel.Register so that an activation token is also created.
 func (m UserModel) New(ctx context.Context, name string) (*User, error) {
 	id := GenerateUserID()
 	u := User{
