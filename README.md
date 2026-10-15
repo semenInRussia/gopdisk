@@ -47,6 +47,33 @@ go run ./cmd/migrate up
 go run ./cmd/api
 ```
 
+The API sends registration messages through SMTP. By default it connects to
+`localhost:1025`, which works with local SMTP tools such as Mailpit. Override
+the connection with `-smtp-host`, `-smtp-port`, `-smtp-username`,
+`-smtp-password`, and `-smtp-sender`.
+
+Register a user with a name, email address, and password:
+
+```bash
+curl -X POST http://127.0.0.1:8080/v1/users \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "Alice",
+    "email": "alice@example.com",
+    "password": "a-long-development-password"
+  }'
+```
+
+Submit the token from the verification email to activate the account:
+
+```bash
+curl -X PUT http://127.0.0.1:8080/v1/users/activated \
+  -H 'Content-Type: application/json' \
+  -d '{"token":"TOKEN_FROM_EMAIL"}'
+```
+
+The activation response contains the user ID needed by the file endpoints.
+
 ## EXAMPLE: Upload an 80 MiB File Through the API
 
 Suppose you have an 80 MiB video named `holiday.mov`. The API accepts parts of
@@ -61,21 +88,16 @@ wc -c < holiday.mov
 
 For an 80 MiB file, the result is `83886080` bytes.
 
-Create the user who will own the file:
-
-```bash
-curl -X POST http://127.0.0.1:8080/v1/users \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"Alice"}'
-```
-
-The response contains the new user ID:
+Register and activate the user as described above. The activation response
+contains the new user ID:
 
 ```json
 {
     "user": {
         "id": "baab6197-3e2d-4969-8492-247bbba900dc",
-        "name": "Alice"
+        "name": "Alice",
+        "email": "alice@example.com",
+        "activated": true
     }
 }
 ```

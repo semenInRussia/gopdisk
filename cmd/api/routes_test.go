@@ -20,7 +20,7 @@ import (
 	"gopherdisk/internal/data"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/julienschmidt/httprouter"
 )
 
@@ -57,7 +57,42 @@ func newTestApplicationWithStoragePath(t *testing.T) (*Application, sqlmock.Sqlm
 	return &Application{
 		storage: storage,
 		logger:  log.New(io.Discard, "", 0),
+		mailer:  noopMailer{},
 	}, mock, storagePath
+}
+
+type noopMailer struct{}
+
+func (noopMailer) Send(string, string, any) error { return nil }
+
+type errorMailer struct{}
+
+func (errorMailer) Send(string, string, any) error { return errors.New("SMTP unavailable") }
+
+type sentEmail struct {
+	recipient    string
+	templateFile string
+	data         map[string]any
+}
+
+type channelMailer struct {
+	sent chan<- sentEmail
+}
+
+func expectRegistrationSuccess(mock sqlmock.Sqlmock) {
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO users (id, name, email, password_hash, activated) VALUES ($1, $2, $3, $4, $5)")).
+		WithArgs(sqlmock.AnyArg(), "Kotik", "kotik@example.com", sqlmock.AnyArg(), false).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO tokens (hash, user_id, expiry, scope) VALUES ($1, $2, $3, $4)")).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), data.ScopeActivation).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+}
+
+func (m channelMailer) Send(recipient, templateFile string, data any) error {
+	m.sent <- sentEmail{recipient: recipient, templateFile: templateFile, data: data.(map[string]any)}
+	return nil
 }
 
 func serveRequest(t *testing.T, app *Application, method, target string, body []byte) *httptest.ResponseRecorder {
@@ -141,21 +176,30 @@ func TestHealthCheckEndpoint(t *testing.T) {
 func TestUsersPostEndpoint(t *testing.T) {
 	t.Run("creates user", func(t *testing.T) {
 		app, mock := newTestApplication(t)
-		mock.ExpectExec(regexp.QuoteMeta("INSERT INTO users (id, name) VALUES ($1, $2)")).
-			WithArgs(sqlmock.AnyArg(), "Kotik").
-			WillReturnResult(sqlmock.NewResult(0, 1))
+		sent := make(chan sentEmail, 1)
+		app.mailer = channelMailer{sent: sent}
+		expectRegistrationSuccess(mock)
 
-		recorder := serveRequest(t, app, http.MethodPost, "/v1/users", []byte(`{"name":"Kotik"}`))
+		recorder := serveRequest(t, app, http.MethodPost, "/v1/users", []byte(`{"name":"Kotik","email":"KOTIK@example.com","password":"long-enough-password"}`))
 
-		assertJSONResponse(t, recorder, http.StatusCreated)
+		assertJSONResponse(t, recorder, http.StatusAccepted)
 		response := decodeResponse[struct {
-			User data.User `json:"user"`
+			Message string `json:"message"`
 		}](t, recorder)
-		if response.User.Name != "Kotik" {
-			t.Errorf("got user name %q, expected %q", response.User.Name, "Kotik")
+		if response.Message == "" {
+			t.Error("expected registration response message")
 		}
-		if _, err := uuid.Parse(string(response.User.ID)); err != nil {
-			t.Errorf("got invalid user UUID %q: %v", response.User.ID, err)
+
+		email := <-sent
+		if email.recipient != "kotik@example.com" {
+			t.Errorf("got email recipient %q, expected %q", email.recipient, "kotik@example.com")
+		}
+		if email.templateFile != "user_welcome.tmpl" {
+			t.Errorf("got template %q, expected user_welcome.tmpl", email.templateFile)
+		}
+		token, ok := email.data["activationToken"].(string)
+		if !ok || len(token) != data.TokenLength {
+			t.Errorf("got invalid activation token %q", token)
 		}
 	})
 
@@ -170,7 +214,7 @@ func TestUsersPostEndpoint(t *testing.T) {
 	t.Run("rejects empty name", func(t *testing.T) {
 		app, _ := newTestApplication(t)
 
-		recorder := serveRequest(t, app, http.MethodPost, "/v1/users", []byte(`{"name":""}`))
+		recorder := serveRequest(t, app, http.MethodPost, "/v1/users", []byte(`{"name":"","email":"kotik@example.com","password":"long-enough-password"}`))
 
 		assertJSONResponse(t, recorder, http.StatusUnprocessableEntity)
 		response := decodeResponse[struct {
@@ -181,27 +225,119 @@ func TestUsersPostEndpoint(t *testing.T) {
 		}
 	})
 
-	t.Run("returns bad request on insert error", func(t *testing.T) {
+	t.Run("returns server error on insert error", func(t *testing.T) {
 		app, mock := newTestApplication(t)
-		mock.ExpectExec(regexp.QuoteMeta("INSERT INTO users (id, name) VALUES ($1, $2)")).
-			WithArgs(sqlmock.AnyArg(), "Kotik").
+		mock.ExpectBegin()
+		mock.ExpectExec(regexp.QuoteMeta("INSERT INTO users (id, name, email, password_hash, activated) VALUES ($1, $2, $3, $4, $5)")).
+			WithArgs(sqlmock.AnyArg(), "Kotik", "kotik@example.com", sqlmock.AnyArg(), false).
 			WillReturnError(errors.New("insert failed"))
+		mock.ExpectRollback()
 
-		recorder := serveRequest(t, app, http.MethodPost, "/v1/users", []byte(`{"name":"Kotik"}`))
+		recorder := serveRequest(t, app, http.MethodPost, "/v1/users", []byte(`{"name":"Kotik","email":"kotik@example.com","password":"long-enough-password"}`))
 
-		assertJSONResponse(t, recorder, http.StatusBadRequest)
+		assertJSONResponse(t, recorder, http.StatusInternalServerError)
+	})
+
+	t.Run("rejects duplicate email", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectBegin()
+		mock.ExpectExec(regexp.QuoteMeta("INSERT INTO users (id, name, email, password_hash, activated) VALUES ($1, $2, $3, $4, $5)")).
+			WithArgs(sqlmock.AnyArg(), "Kotik", "kotik@example.com", sqlmock.AnyArg(), false).
+			WillReturnError(&pgconn.PgError{Code: "23505", ConstraintName: "users_email_unique_idx"})
+		mock.ExpectRollback()
+
+		recorder := serveRequest(t, app, http.MethodPost, "/v1/users", []byte(`{"name":"Kotik","email":"kotik@example.com","password":"long-enough-password"}`))
+
+		assertJSONResponse(t, recorder, http.StatusUnprocessableEntity)
+		response := decodeResponse[struct {
+			Error map[string]string `json:"error"`
+		}](t, recorder)
+		if response.Error["email"] == "" {
+			t.Error("expected duplicate email validation error")
+		}
+	})
+
+	t.Run("accepts registration when email delivery fails", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		app.mailer = errorMailer{}
+		expectRegistrationSuccess(mock)
+
+		recorder := serveRequest(t, app, http.MethodPost, "/v1/users", []byte(`{"name":"Kotik","email":"kotik@example.com","password":"long-enough-password"}`))
+		app.wg.Wait()
+
+		assertJSONResponse(t, recorder, http.StatusAccepted)
+	})
+}
+
+func TestUsersActivatedPutEndpoint(t *testing.T) {
+	const (
+		userID = "baab6197-3e2d-4969-8492-247bbba900dc"
+		token  = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	)
+	lookupQuery := regexp.QuoteMeta(`
+		SELECT u.id, u.name, u.email, u.password_hash, u.activated
+		FROM users u
+		INNER JOIN tokens t ON t.user_id = u.id
+		WHERE t.hash = $1 AND t.scope = $2 AND t.expiry > now()
+		FOR UPDATE OF u`)
+
+	t.Run("activates user and consumes tokens", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectBegin()
+		mock.ExpectQuery(lookupQuery).
+			WithArgs(sqlmock.AnyArg(), data.ScopeActivation).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email", "password_hash", "activated"}).
+				AddRow(userID, "Kotik", "kotik@example.com", []byte("!"), false))
+		mock.ExpectExec(regexp.QuoteMeta("UPDATE users SET activated = TRUE WHERE id = $1")).
+			WithArgs(data.UserID(userID)).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectExec(regexp.QuoteMeta("DELETE FROM tokens WHERE scope = $1 AND user_id = $2")).
+			WithArgs(data.ScopeActivation, data.UserID(userID)).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectCommit()
+
+		recorder := serveRequest(t, app, http.MethodPut, "/v1/users/activated", []byte(`{"token":"`+token+`"}`))
+
+		assertJSONResponse(t, recorder, http.StatusOK)
+		response := decodeResponse[struct {
+			User data.User `json:"user"`
+		}](t, recorder)
+		if !response.User.Activated || response.User.Email != "kotik@example.com" {
+			t.Errorf("got user %+v, expected activated user", response.User)
+		}
+		if bytes.Contains(recorder.Body.Bytes(), []byte("password")) {
+			t.Error("response exposed password data")
+		}
+	})
+
+	t.Run("rejects malformed token", func(t *testing.T) {
+		app, _ := newTestApplication(t)
+		recorder := serveRequest(t, app, http.MethodPut, "/v1/users/activated", []byte(`{"token":"short"}`))
+		assertJSONResponse(t, recorder, http.StatusUnprocessableEntity)
+	})
+
+	t.Run("rejects unknown or expired token", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectBegin()
+		mock.ExpectQuery(lookupQuery).
+			WithArgs(sqlmock.AnyArg(), data.ScopeActivation).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email", "password_hash", "activated"}))
+		mock.ExpectRollback()
+
+		recorder := serveRequest(t, app, http.MethodPut, "/v1/users/activated", []byte(`{"token":"`+token+`"}`))
+		assertJSONResponse(t, recorder, http.StatusUnprocessableEntity)
 	})
 }
 
 func TestUsersGetEndpoint(t *testing.T) {
 	const userID = "baab6197-3e2d-4969-8492-247bbba900dc"
-	query := regexp.QuoteMeta("SELECT id, name FROM users WHERE id = $1")
+	query := regexp.QuoteMeta("SELECT id, name, email, password_hash, activated FROM users WHERE id = $1")
 
 	t.Run("returns user", func(t *testing.T) {
 		app, mock := newTestApplication(t)
 		mock.ExpectQuery(query).
 			WithArgs(data.UserID(userID)).
-			WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).AddRow(userID, "Kotik"))
+			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email", "password_hash", "activated"}).AddRow(userID, "Kotik", "kotik@example.com", []byte("!"), false))
 
 		recorder := serveRequest(t, app, http.MethodGet, "/v1/users/"+userID, nil)
 
@@ -218,7 +354,7 @@ func TestUsersGetEndpoint(t *testing.T) {
 		app, mock := newTestApplication(t)
 		mock.ExpectQuery(query).
 			WithArgs(data.UserID(userID)).
-			WillReturnRows(sqlmock.NewRows([]string{"id", "name"}))
+			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email", "password_hash", "activated"}))
 
 		recorder := serveRequest(t, app, http.MethodGet, "/v1/users/"+userID, nil)
 
@@ -286,7 +422,7 @@ func TestUsersFilesGetEndpoint(t *testing.T) {
 		firstFileID = "32f11d17-b1f5-4fb0-94ca-614903665dff"
 		lastFileID  = "fb4e2882-0c27-4cf5-b17e-e84fb8a05e5c"
 	)
-	userQuery := regexp.QuoteMeta("SELECT id, name FROM users WHERE id = $1")
+	userQuery := regexp.QuoteMeta("SELECT id, name, email, password_hash, activated FROM users WHERE id = $1")
 	filesQuery := regexp.QuoteMeta(`
 		SELECT id, name, filetype, owner_id, status, size
 		FROM files
@@ -297,7 +433,7 @@ func TestUsersFilesGetEndpoint(t *testing.T) {
 		app, mock := newTestApplication(t)
 		mock.ExpectQuery(userQuery).
 			WithArgs(data.UserID(userID)).
-			WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).AddRow(userID, "Kotik"))
+			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email", "password_hash", "activated"}).AddRow(userID, "Kotik", "kotik@example.com", []byte("!"), false))
 		mock.ExpectQuery(filesQuery).
 			WithArgs(data.UserID(userID), data.FileStatusReady).
 			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "filetype", "owner_id", "status", "size"}).
@@ -328,7 +464,7 @@ func TestUsersFilesGetEndpoint(t *testing.T) {
 		app, mock := newTestApplication(t)
 		mock.ExpectQuery(userQuery).
 			WithArgs(data.UserID(userID)).
-			WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).AddRow(userID, "Kotik"))
+			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email", "password_hash", "activated"}).AddRow(userID, "Kotik", "kotik@example.com", []byte("!"), false))
 		mock.ExpectQuery(filesQuery).
 			WithArgs(data.UserID(userID), data.FileStatusReady).
 			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "filetype", "owner_id", "status", "size"}))
@@ -351,7 +487,7 @@ func TestUsersFilesGetEndpoint(t *testing.T) {
 		app, mock := newTestApplication(t)
 		mock.ExpectQuery(userQuery).
 			WithArgs(data.UserID(userID)).
-			WillReturnRows(sqlmock.NewRows([]string{"id", "name"}))
+			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email", "password_hash", "activated"}))
 
 		recorder := serveRequest(t, app, http.MethodGet, "/v1/users/"+userID+"/files", nil)
 
@@ -362,7 +498,7 @@ func TestUsersFilesGetEndpoint(t *testing.T) {
 		app, mock := newTestApplication(t)
 		mock.ExpectQuery(userQuery).
 			WithArgs(data.UserID(userID)).
-			WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).AddRow(userID, "Kotik"))
+			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email", "password_hash", "activated"}).AddRow(userID, "Kotik", "kotik@example.com", []byte("!"), false))
 		mock.ExpectQuery(filesQuery).
 			WithArgs(data.UserID(userID), data.FileStatusReady).
 			WillReturnError(errors.New("select failed"))
@@ -379,7 +515,7 @@ func TestUsersUploadsGetEndpoint(t *testing.T) {
 		firstFileID = "32f11d17-b1f5-4fb0-94ca-614903665dff"
 		lastFileID  = "fb4e2882-0c27-4cf5-b17e-e84fb8a05e5c"
 	)
-	userQuery := regexp.QuoteMeta("SELECT id, name FROM users WHERE id = $1")
+	userQuery := regexp.QuoteMeta("SELECT id, name, email, password_hash, activated FROM users WHERE id = $1")
 	uploadsQuery := regexp.QuoteMeta(`
 		SELECT id, name, filetype, owner_id, status, size
 		FROM files
@@ -390,7 +526,7 @@ func TestUsersUploadsGetEndpoint(t *testing.T) {
 		app, mock := newTestApplication(t)
 		mock.ExpectQuery(userQuery).
 			WithArgs(data.UserID(userID)).
-			WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).AddRow(userID, "Kotik"))
+			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email", "password_hash", "activated"}).AddRow(userID, "Kotik", "kotik@example.com", []byte("!"), false))
 		mock.ExpectQuery(uploadsQuery).
 			WithArgs(data.UserID(userID), data.FileStatusUploading).
 			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "filetype", "owner_id", "status", "size"}).
@@ -421,7 +557,7 @@ func TestUsersUploadsGetEndpoint(t *testing.T) {
 		app, mock := newTestApplication(t)
 		mock.ExpectQuery(userQuery).
 			WithArgs(data.UserID(userID)).
-			WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).AddRow(userID, "Kotik"))
+			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email", "password_hash", "activated"}).AddRow(userID, "Kotik", "kotik@example.com", []byte("!"), false))
 		mock.ExpectQuery(uploadsQuery).
 			WithArgs(data.UserID(userID), data.FileStatusUploading).
 			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "filetype", "owner_id", "status", "size"}))
@@ -444,7 +580,7 @@ func TestUsersUploadsGetEndpoint(t *testing.T) {
 		app, mock := newTestApplication(t)
 		mock.ExpectQuery(userQuery).
 			WithArgs(data.UserID(userID)).
-			WillReturnRows(sqlmock.NewRows([]string{"id", "name"}))
+			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email", "password_hash", "activated"}))
 
 		recorder := serveRequest(t, app, http.MethodGet, "/v1/users/"+userID+"/uploads", nil)
 
@@ -455,7 +591,7 @@ func TestUsersUploadsGetEndpoint(t *testing.T) {
 		app, mock := newTestApplication(t)
 		mock.ExpectQuery(userQuery).
 			WithArgs(data.UserID(userID)).
-			WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).AddRow(userID, "Kotik"))
+			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email", "password_hash", "activated"}).AddRow(userID, "Kotik", "kotik@example.com", []byte("!"), false))
 		mock.ExpectQuery(uploadsQuery).
 			WithArgs(data.UserID(userID), data.FileStatusUploading).
 			WillReturnError(errors.New("select failed"))

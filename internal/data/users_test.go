@@ -74,7 +74,8 @@ func TestGetUserReturnsNotFound(t *testing.T) {
 
 func TestInsertUserPersistsConstructedUser(t *testing.T) {
 	s := getStorage(t)
-	user := User{ID: GenerateUserID(), Name: "Constructed"}
+	user := User{ID: GenerateUserID(), Name: "Constructed", Email: "constructed@example.com"}
+	user.Password.setHash([]byte("!"))
 	if err := s.Users.Insert(context.Background(), user); err != nil {
 		t.Fatalf("cannot insert user: %v", err)
 	}
@@ -82,7 +83,7 @@ func TestInsertUserPersistsConstructedUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot get inserted user: %v", err)
 	}
-	if got == nil || *got != user {
+	if got == nil || got.ID != user.ID || got.Name != user.Name || got.Email != user.Email || got.Activated != user.Activated {
 		t.Fatalf("got %+v, expected %+v", got, user)
 	}
 }

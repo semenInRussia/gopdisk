@@ -8,10 +8,12 @@ import (
 	"gopherdisk/internal/blobs"
 	"gopherdisk/internal/data"
 	"gopherdisk/internal/database"
+	"gopherdisk/internal/mailer"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -25,12 +27,25 @@ type Config struct {
 		dbURL string
 		path  string
 	}
+	smtp struct {
+		host     string
+		port     int
+		username string
+		password string
+		sender   string
+	}
+}
+
+type mailSender interface {
+	Send(recipient, templateFile string, data any) error
 }
 
 type Application struct {
 	cfg     Config
 	storage *data.Storage
 	logger  *log.Logger
+	mailer  mailSender
+	wg      sync.WaitGroup
 }
 
 func (app *Application) serve() error {
@@ -67,6 +82,7 @@ func (app *Application) serve() error {
 	// wait srv.Shutdown() done
 
 	err = <-shutdownError
+	app.wg.Wait()
 
 	if err == nil {
 		app.logger.Print("stopped server")
@@ -82,6 +98,11 @@ func main() {
 	flag.Int64Var(&cfg.maxBlobSize, "blob", blobs.BlobsMaxSize, "maximum size of one blob")
 	flag.StringVar(&cfg.storage.dbURL, "db", database.DefaultURL(), "URL of database to use")
 	flag.StringVar(&cfg.storage.path, "path", "data", "path to the directory where all located all data")
+	flag.StringVar(&cfg.smtp.host, "smtp-host", "localhost", "SMTP server hostname")
+	flag.IntVar(&cfg.smtp.port, "smtp-port", 1025, "SMTP server port")
+	flag.StringVar(&cfg.smtp.username, "smtp-username", "", "SMTP username")
+	flag.StringVar(&cfg.smtp.password, "smtp-password", "", "SMTP password")
+	flag.StringVar(&cfg.smtp.sender, "smtp-sender", "GopherDisk <no-reply@gopherdisk.online>", "SMTP sender")
 
 	flag.Parse()
 
@@ -103,43 +124,8 @@ func main() {
 		cfg:     cfg,
 		logger:  logger,
 		storage: storage,
+		mailer:  mailer.New(cfg.smtp.host, cfg.smtp.port, cfg.smtp.username, cfg.smtp.password, cfg.smtp.sender),
 	}
-
-	go func() {
-		user, err := storage.Users.New(context.Background(), "frametamer")
-		if err != nil {
-			app.logger.Printf("%v", err)
-			return
-		}
-
-		movie, err := os.Open("internal/data/testdata/movie.mov")
-		if err != nil {
-			app.logger.Printf("%v", err)
-			return
-		}
-		defer movie.Close()
-
-		info, err := movie.Stat()
-		if err != nil {
-			app.logger.Printf("%v", err)
-			return
-		}
-
-		file, err := storage.Files.UploadReader(
-			context.Background(),
-			user.ID,
-			info.Name(),
-			data.FileType("video/quicktime"),
-			movie,
-			info.Size(),
-		)
-		if err != nil {
-			app.logger.Printf("%v", err)
-			return
-		}
-
-		app.logger.Printf("File id: %s\n", file.ID)
-	}()
 
 	err = app.serve()
 

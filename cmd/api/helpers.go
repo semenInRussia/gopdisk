@@ -8,6 +8,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"strings"
 
@@ -72,6 +73,17 @@ func (app *Application) readJSON(
 	}
 
 	return nil
+}
+
+func (app *Application) background(fn func()) {
+	app.wg.Go(func() {
+		defer func() {
+			if err := recover(); err != nil {
+				app.logger.Printf("background panic: %v\n%s", err, debug.Stack())
+			}
+		}()
+		fn()
+	})
 }
 
 func (app *Application) writeJSON(

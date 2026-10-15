@@ -1,5 +1,10 @@
 package validator
 
+import (
+	"regexp"
+	"unicode/utf8"
+)
+
 type Validator struct {
 	Errors map[string]string
 }
@@ -25,4 +30,12 @@ func (v *Validator) Check(key string, cond bool, errDescription string) {
 	if !cond {
 		v.AddError(key, errDescription)
 	}
+}
+
+func Matches(value string, rx *regexp.Regexp) bool {
+	return rx.MatchString(value)
+}
+
+func RuneCount(value string) int {
+	return utf8.RuneCountInString(value)
 }

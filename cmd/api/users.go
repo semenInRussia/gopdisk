@@ -9,7 +9,9 @@ import (
 
 func (app *Application) usersPostHandler(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		Name string `json:"name"`
+		Name     string `json:"name"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
 
 	err := app.readJSON(w, r, &input)
@@ -20,25 +22,75 @@ func (app *Application) usersPostHandler(w http.ResponseWriter, r *http.Request)
 
 	v := validator.New()
 	data.ValidateUserName(v, input.Name)
+	input.Email = data.NormalizeEmail(input.Email)
+	data.ValidateEmail(v, input.Email)
+	data.ValidatePasswordPlaintext(v, input.Password)
 
 	if !v.IsValid() {
 		app.writeValidatorErrors(w, v)
 		return
 	}
 
-	user, err := app.storage.Users.New(r.Context(), input.Name)
+	user, token, err := app.storage.RegisterUser(r.Context(), input.Name, input.Email, input.Password)
 	if err != nil {
+		if errors.Is(err, data.ErrDuplicateEmail) {
+			v.AddError("email", "a user with this email address already exists")
+			app.writeValidatorErrors(w, v)
+			return
+		}
+		app.serverErrorResponse(w, err)
+		return
+	}
+
+	app.background(func() {
+		templateData := map[string]any{
+			"user":            user,
+			"activationToken": token.Plaintext,
+		}
+		if err := app.mailer.Send(user.Email, "user_welcome.tmpl", templateData); err != nil {
+			app.logError(err)
+		}
+	})
+
+	response := Envelope{
+		"message": "an email will be sent to you containing activation instructions",
+	}
+
+	err = app.writeJSON(w, response, http.StatusAccepted, nil)
+	if err != nil {
+		app.logError(err)
+	}
+}
+
+func (app *Application) usersActivatedPutHandler(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		TokenPlaintext string `json:"token"`
+	}
+	if err := app.readJSON(w, r, &input); err != nil {
 		app.badRequestErrorResponse(w, err.Error())
 		return
 	}
 
-	data := Envelope{
-		"user": user,
+	v := validator.New()
+	data.ValidateTokenPlaintext(v, input.TokenPlaintext)
+	if !v.IsValid() {
+		app.writeValidatorErrors(w, v)
+		return
 	}
 
-	err = app.writeJSON(w, data, http.StatusCreated, nil)
+	user, err := app.storage.ActivateUser(r.Context(), input.TokenPlaintext)
 	if err != nil {
-		app.logError(err)
+		if errors.Is(err, data.ErrInvalidToken) {
+			v.AddError("token", "is invalid or has expired")
+			app.writeValidatorErrors(w, v)
+			return
+		}
+		app.serverErrorResponse(w, err)
+		return
+	}
+
+	if err := app.writeJSON(w, Envelope{"user": user}, http.StatusOK, nil); err != nil {
+		app.serverErrorResponse(w, err)
 	}
 }
 

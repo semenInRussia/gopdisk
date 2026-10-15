@@ -1,0 +1,26 @@
+{{define "subject"}}Welcome to GopherDisk{{end}}
+
+{{define "plainBody"}}
+Hi {{.user.Name}},
+
+Thanks for registering with GopherDisk.
+
+Use the activation token below with PUT /v1/users/activated:
+
+{{.activationToken}}
+
+This token expires in 3 days.
+{{end}}
+
+{{define "htmlBody"}}
+<!doctype html>
+<html lang="en">
+<body>
+  <p>Hi {{.user.Name}},</p>
+  <p>Thanks for registering with GopherDisk.</p>
+  <p>Use this activation token with <code>PUT /v1/users/activated</code>:</p>
+  <p><strong>{{.activationToken}}</strong></p>
+  <p>This token expires in 3 days.</p>
+</body>
+</html>
+{{end}}

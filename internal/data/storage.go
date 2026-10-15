@@ -2,8 +2,11 @@ package data
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
+	"time"
+
 	"gopherdisk/internal/blobs"
 )
 
@@ -12,10 +15,11 @@ var (
 )
 
 type Storage struct {
-	bs    *blobs.BlobStorage
-	db    *sql.DB
-	Users UserModel
-	Files FileModel
+	bs     *blobs.BlobStorage
+	db     *sql.DB
+	Users  UserModel
+	Files  FileModel
+	Tokens TokenModel
 }
 
 func MakeStorage(path string, db *sql.DB) (*Storage, error) {
@@ -29,13 +33,86 @@ func MakeStorage(path string, db *sql.DB) (*Storage, error) {
 	}
 
 	s := Storage{
-		bs:    bs,
-		db:    db,
-		Files: FileModel{db: db, bs: bs},
-		Users: UserModel{db: db},
+		bs:     bs,
+		db:     db,
+		Files:  FileModel{db: db, bs: bs},
+		Users:  UserModel{db: db},
+		Tokens: TokenModel{db: db},
 	}
 
 	return &s, nil
+}
+
+func (s *Storage) RegisterUser(ctx context.Context, name, email, plaintextPassword string) (*User, *Token, error) {
+	user := User{
+		ID:    GenerateUserID(),
+		Name:  name,
+		Email: NormalizeEmail(email),
+	}
+	if err := user.Password.Set(plaintextPassword); err != nil {
+		return nil, nil, err
+	}
+
+	token, err := GenerateToken(user.ID, 3*24*time.Hour, ScopeActivation)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback()
+
+	if err := insertUser(ctx, tx, user); err != nil {
+		return nil, nil, err
+	}
+	if err := insertToken(ctx, tx, *token); err != nil {
+		return nil, nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, nil, err
+	}
+
+	return &user, token, nil
+}
+
+func (s *Storage) ActivateUser(ctx context.Context, tokenPlaintext string) (*User, error) {
+	tokenHash := sha256.Sum256([]byte(tokenPlaintext))
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	row := tx.QueryRowContext(ctx, `
+		SELECT u.id, u.name, u.email, u.password_hash, u.activated
+		FROM users u
+		INNER JOIN tokens t ON t.user_id = u.id
+		WHERE t.hash = $1 AND t.scope = $2 AND t.expiry > now()
+		FOR UPDATE OF u`, tokenHash[:], ScopeActivation)
+
+	user, err := scanUser(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrInvalidToken
+		}
+		return nil, err
+	}
+
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET activated = TRUE WHERE id = $1`, user.ID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM tokens WHERE scope = $1 AND user_id = $2`, ScopeActivation, user.ID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	user.Activated = true
+	return user, nil
 }
 
 func (s *Storage) CollectGarbageBlobs(ctx context.Context) (int, error) {
