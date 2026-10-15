@@ -274,18 +274,19 @@ func TestUsersActivatedPutEndpoint(t *testing.T) {
 		userID = "baab6197-3e2d-4969-8492-247bbba900dc"
 		token  = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 	)
+	tokenHash := sha256.Sum256([]byte(token))
 	lookupQuery := regexp.QuoteMeta(`
 		SELECT u.id, u.name, u.email, u.password_hash, u.activated
 		FROM users u
 		INNER JOIN tokens t ON t.user_id = u.id
 		WHERE t.hash = $1 AND t.scope = $2 AND t.expiry > now()
-		FOR UPDATE OF u`)
+		FOR UPDATE OF u, t`)
 
 	t.Run("activates user and consumes tokens", func(t *testing.T) {
 		app, mock := newTestApplication(t)
 		mock.ExpectBegin()
 		mock.ExpectQuery(lookupQuery).
-			WithArgs(sqlmock.AnyArg(), data.ScopeActivation).
+			WithArgs(tokenHash[:], data.ScopeActivation).
 			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email", "password_hash", "activated"}).
 				AddRow(userID, "Kotik", "kotik@example.com", []byte("!"), false))
 		mock.ExpectExec(regexp.QuoteMeta("UPDATE users SET activated = TRUE WHERE id = $1")).
@@ -320,12 +321,31 @@ func TestUsersActivatedPutEndpoint(t *testing.T) {
 		app, mock := newTestApplication(t)
 		mock.ExpectBegin()
 		mock.ExpectQuery(lookupQuery).
-			WithArgs(sqlmock.AnyArg(), data.ScopeActivation).
+			WithArgs(tokenHash[:], data.ScopeActivation).
 			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email", "password_hash", "activated"}))
 		mock.ExpectRollback()
 
 		recorder := serveRequest(t, app, http.MethodPut, "/v1/users/activated", []byte(`{"token":"`+token+`"}`))
 		assertJSONResponse(t, recorder, http.StatusUnprocessableEntity)
+	})
+
+	t.Run("rolls back when token consumption fails", func(t *testing.T) {
+		app, mock := newTestApplication(t)
+		mock.ExpectBegin()
+		mock.ExpectQuery(lookupQuery).
+			WithArgs(tokenHash[:], data.ScopeActivation).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email", "password_hash", "activated"}).
+				AddRow(userID, "Kotik", "kotik@example.com", []byte("!"), false))
+		mock.ExpectExec(regexp.QuoteMeta("UPDATE users SET activated = TRUE WHERE id = $1")).
+			WithArgs(data.UserID(userID)).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectExec(regexp.QuoteMeta("DELETE FROM tokens WHERE scope = $1 AND user_id = $2")).
+			WithArgs(data.ScopeActivation, data.UserID(userID)).
+			WillReturnError(errors.New("delete token failed"))
+		mock.ExpectRollback()
+
+		recorder := serveRequest(t, app, http.MethodPut, "/v1/users/activated", []byte(`{"token":"`+token+`"}`))
+		assertJSONResponse(t, recorder, http.StatusInternalServerError)
 	})
 }
 

@@ -90,26 +90,14 @@ func (m UserModel) Register(ctx context.Context, name, email, plaintextPassword 
 }
 
 func (m UserModel) Activate(ctx context.Context, tokenPlaintext string) (*User, error) {
-	tokenHash := sha256.Sum256([]byte(tokenPlaintext))
-
 	tx, err := m.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	row := tx.QueryRowContext(ctx, `
-		SELECT u.id, u.name, u.email, u.password_hash, u.activated
-		FROM users u
-		INNER JOIN tokens t ON t.user_id = u.id
-		WHERE t.hash = $1 AND t.scope = $2 AND t.expiry > now()
-		FOR UPDATE OF u`, tokenHash[:], ScopeActivation)
-
-	user, err := scanUser(row)
+	user, err := getForToken(ctx, tx, ScopeActivation, tokenPlaintext, true)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrInvalidToken
-		}
 		return nil, err
 	}
 
@@ -173,6 +161,38 @@ func (m UserModel) Get(ctx context.Context, userID UserID) (*User, error) {
 		}
 		return nil, err
 	}
+	return user, nil
+}
+
+func (m UserModel) GetForToken(ctx context.Context, scope string, tokenPlaintext string) (*User, error) {
+	return getForToken(ctx, m.db, scope, tokenPlaintext, false)
+}
+
+func getForToken(ctx context.Context, db dbExecutor, scope, tokenPlaintext string, lock bool) (*User, error) {
+	hash := sha256.Sum256([]byte(tokenPlaintext))
+
+	query := `
+		SELECT u.id, u.name, u.email, u.password_hash, u.activated
+		FROM users u
+		INNER JOIN tokens t ON t.user_id = u.id
+		WHERE t.hash = $1 AND t.scope = $2 AND t.expiry > now()`
+
+	if lock {
+		query += ` FOR UPDATE OF u, t`
+	}
+
+	row := db.QueryRowContext(ctx, query, hash[:], scope)
+
+	user, err := scanUser(row)
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, ErrInvalidToken
+		default:
+			return nil, err
+		}
+	}
+
 	return user, nil
 }
 
