@@ -176,6 +176,22 @@ func (m UserModel) Get(ctx context.Context, userID UserID) (*User, error) {
 	return user, nil
 }
 
+func (m UserModel) GetByEmail(ctx context.Context, email string) (*User, error) {
+	row := m.db.QueryRowContext(ctx, `
+		SELECT id, name, email, password_hash, activated
+		FROM users
+		WHERE lower(email) = lower($1)`, NormalizeEmail(email))
+
+	user, err := scanUser(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrUserNotFound
+		}
+		return nil, err
+	}
+	return user, nil
+}
+
 func scanUser(row *sql.Row) (*User, error) {
 	var user User
 	var passwordHash []byte
