@@ -47,10 +47,27 @@ go run ./cmd/migrate up
 go run ./cmd/api
 ```
 
-The API sends registration messages through SMTP. By default it connects to
-`localhost:1025`, which works with local SMTP tools such as Mailpit. Override
-the connection with `-smtp-host`, `-smtp-port`, `-smtp-username`,
-`-smtp-password`, and `-smtp-sender`.
+The API sends registration messages through SMTP. Configure it with
+`GOPHERDISK_SMTP_HOST`, `GOPHERDISK_SMTP_PORT`,
+`GOPHERDISK_SMTP_USERNAME`, `GOPHERDISK_SMTP_PASSWORD`, and
+`GOPHERDISK_SMTP_SENDER`. When host and port are unset, the current defaults
+are Yandex Postbox at `postbox.cloud.yandex.net:587`. The equivalent `-smtp-*`
+command-line flags remain available and take precedence over environment
+variables.
+
+For example, using Brevo:
+
+```bash
+export GOPHERDISK_SMTP_HOST='smtp-relay.brevo.com'
+export GOPHERDISK_SMTP_PORT='587'
+export GOPHERDISK_SMTP_USERNAME='your-brevo-smtp-login'
+export GOPHERDISK_SMTP_PASSWORD='your-brevo-smtp-key'
+export GOPHERDISK_SMTP_SENDER='GopherDisk <your-verified-sender@example.com>'
+
+go run ./cmd/api
+```
+
+Do not commit real SMTP credentials to the repository.
 
 Register a user with a name, email address, and password:
 

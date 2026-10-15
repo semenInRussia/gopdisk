@@ -13,12 +13,21 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
 )
 
 const version = "1.0.0"
+
+const (
+	envSMTPHost     = "GOPHERDISK_SMTP_HOST"
+	envSMTPPort     = "GOPHERDISK_SMTP_PORT"
+	envSMTPUsername = "GOPHERDISK_SMTP_USERNAME"
+	envSMTPPassword = "GOPHERDISK_SMTP_PASSWORD"
+	envSMTPSender   = "GOPHERDISK_SMTP_SENDER"
+)
 
 type Config struct {
 	port        int
@@ -46,6 +55,25 @@ type Application struct {
 	logger  *log.Logger
 	mailer  mailSender
 	wg      sync.WaitGroup
+}
+
+func envOrDefault(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func envIntOrDefault(key string, fallback int) int {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	num, err := strconv.ParseInt(value, 10, 32)
+	if err != nil {
+		return fallback
+	}
+	return int(num)
 }
 
 func (app *Application) serve() error {
@@ -98,11 +126,12 @@ func main() {
 	flag.Int64Var(&cfg.maxBlobSize, "blob", blobs.BlobsMaxSize, "maximum size of one blob")
 	flag.StringVar(&cfg.storage.dbURL, "db", database.DefaultURL(), "URL of database to use")
 	flag.StringVar(&cfg.storage.path, "path", "data", "path to the directory where all located all data")
-	flag.StringVar(&cfg.smtp.host, "smtp-host", "localhost", "SMTP server hostname")
-	flag.IntVar(&cfg.smtp.port, "smtp-port", 1025, "SMTP server port")
-	flag.StringVar(&cfg.smtp.username, "smtp-username", "", "SMTP username")
-	flag.StringVar(&cfg.smtp.password, "smtp-password", "", "SMTP password")
-	flag.StringVar(&cfg.smtp.sender, "smtp-sender", "GopherDisk <no-reply@gopherdisk.online>", "SMTP sender")
+
+	flag.StringVar(&cfg.smtp.host, "smtp-host", envOrDefault(envSMTPHost, "postbox.cloud.yandex.net"), "SMTP server hostname")
+	flag.IntVar(&cfg.smtp.port, "smtp-port", envIntOrDefault(envSMTPPort, 587), "SMTP server port")
+	flag.StringVar(&cfg.smtp.username, "smtp-username", envOrDefault(envSMTPUsername, ""), "SMTP username")
+	flag.StringVar(&cfg.smtp.password, "smtp-password", envOrDefault(envSMTPPassword, ""), "SMTP password")
+	flag.StringVar(&cfg.smtp.sender, "smtp-sender", envOrDefault(envSMTPSender, "GopherDisk <no-reply@gopherdisk.online>"), "SMTP sender")
 
 	flag.Parse()
 
