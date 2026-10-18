@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	ScopeActivation  = "activation"
-	tokenRandomBytes = 16
-	TokenLength      = 26
+	ScopeActivation     = "activation"
+	ScopeAuthentication = "authentication"
+	tokenRandomBytes    = 16
+	TokenLength         = 26
 )
 
 type Token struct {

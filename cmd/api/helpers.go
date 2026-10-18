@@ -141,6 +141,16 @@ func (app *Application) methodNotAllowedResponse(w http.ResponseWriter, r *http.
 	app.errorResponse(w, message, http.StatusMethodNotAllowed)
 }
 
+func (app *Application) invalidCredentialsResponse(w http.ResponseWriter) {
+	message := "invalid authentication credentials"
+	app.errorResponse(w, message, http.StatusUnauthorized)
+}
+
+func (app *Application) invalidAuthenticationTokenResponse(w http.ResponseWriter) {
+	w.Header().Set("WWW-Authenticate", "Bearer")
+	app.errorResponse(w, "invalid or missing authentication token", http.StatusUnauthorized)
+}
+
 func (app *Application) writeValidatorErrors(w http.ResponseWriter, v *validator.Validator) {
 	status := http.StatusUnprocessableEntity
 	if v.IsValid() {

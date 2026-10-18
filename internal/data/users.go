@@ -26,12 +26,18 @@ var (
 
 type UserID string
 
+var AnonymousUser = &User{}
+
 type User struct {
 	ID        UserID   `json:"id"`
 	Name      string   `json:"name"`
 	Email     string   `json:"email"`
 	Activated bool     `json:"activated"`
 	Password  Password `json:"-"`
+}
+
+func (u *User) IsAnonymous() bool {
+	return u == AnonymousUser
 }
 
 type UserModel struct {

@@ -47,5 +47,8 @@ func (app *Application) routes() http.Handler {
 	router.HandlerFunc(http.MethodPost, "/v1/uploads/:file_id/complete", app.uploadsCompletePostHandler)
 	router.HandlerFunc(http.MethodDelete, "/v1/uploads/:file_id", app.uploadsDeleteHandler)
 
-	return app.recoverPanic(router)
+	// Tokens
+	router.HandlerFunc(http.MethodPost, "/v1/tokens/authentication", app.tokensAuthenticationPostHandler)
+
+	return app.recoverPanic(app.authenticate(router))
 }
