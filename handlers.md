@@ -44,10 +44,19 @@ returns `401`; a valid token for an inactive user returns `403`.
 Authentication-related `401` responses from middleware include
 `WWW-Authenticate: Bearer`.
 
-Only permissions management currently checks that the caller owns the file.
-Other user, file, and upload handlers require activation but do not check
-ownership or enforce stored file permissions. Upload creation still takes
-`owner_id` from the request body.
+Authorization is enforced after authentication and activation:
+
+- user endpoints may only address the authenticated user's own ID;
+- `files:read` permits reading file metadata, contents, and upload progress;
+- `files:write` permits renaming files and adding, replacing, removing, or
+  completing upload parts;
+- `files:delete` permits deleting a file or canceling its upload;
+- file owners implicitly have every file permission;
+- permissions management remains owner-only;
+- upload creation accepts `owner_id`, but it must match the authenticated user.
+
+Permission codes are scoped to one file. A permission for one file never grants
+access to another file, and one permission code does not imply another.
 
 ### Errors
 
@@ -228,40 +237,46 @@ set `WWW-Authenticate`.
 
 ### GET /v1/users/:id
 
-No body. Returns `200 OK` with the shared `user` envelope, or `404` for a
-nonexistent user.
+No body. The path ID must identify the authenticated user; another user's ID
+returns `403`. Returns `200 OK` with the shared `user` envelope, or `404` if the
+authenticated user's row no longer exists.
 
 ### DELETE /v1/users/:id
 
-No body. Returns `204 No Content`, or `404` for a nonexistent user. There is no
-cascading-delete option for owned files. If the user still owns files or
+No body. The path ID must identify the authenticated user; another user's ID
+returns `403`. Returns `204 No Content`, or `404` for a nonexistent user. There
+is no cascading-delete option for owned files. If the user still owns files or
 uploads, the database foreign key prevents deletion; the current handler
 reports this as `500`, not `409`.
 
 ### GET /v1/users/:id/files
 
-No body. Returns `200 OK` with `{"files":[...]}`. Items use the shared file
-shape, have status `ready`, and are ordered by name and ID. An empty collection
-is `{"files":[]}`. There is no pagination metadata. A nonexistent user
-currently returns `400`, not `404`.
+No body. The path ID must identify the authenticated user; another user's ID
+returns `403`. Returns `200 OK` with `{"files":[...]}`. Items use the shared
+file shape, have status `ready`, and are ordered by name and ID. An empty
+collection is `{"files":[]}`. There is no pagination metadata. A nonexistent
+authenticated user currently returns `400`, not `404`.
 
 ### GET /v1/users/:id/uploads
 
-No body. Returns `200 OK` with `{"files":[...]}`, using the shared file shape,
-status `uploading`, ordered by name and ID. It does not return an `uploads`
-envelope, part counts, parts, or received sizes. For progress details, use
-`GET /v1/uploads/:file_id`. A nonexistent user currently returns `400`.
+No body. The path ID must identify the authenticated user; another user's ID
+returns `403`. Returns `200 OK` with `{"files":[...]}`, using the shared file
+shape, status `uploading`, ordered by name and ID. It does not return an
+`uploads` envelope, part counts, parts, or received sizes. For progress details,
+use `GET /v1/uploads/:file_id`. A nonexistent authenticated user currently
+returns `400`.
 
 ## Files
 
 ### GET /v1/files/:id
 
-No body. Returns `200 OK` with the shared `file` envelope. Only completed files
-are returned; an unfinished or nonexistent file returns `404`.
+Requires `files:read` for the file. No body. Returns `200 OK` with the shared
+`file` envelope. Only completed files are returned; an unfinished or
+nonexistent file returns `404`.
 
 ### PATCH /v1/files/:id
 
-Request:
+Requires `files:write` for the file. Request:
 
 ```json
 {"name": "holiday.mov"}
@@ -274,15 +289,17 @@ validator, so name validation errors use the key `user`, not `name`.
 
 ### DELETE /v1/files/:id
 
-No body. Returns `204 No Content`, or `404` if the file does not exist.
+Requires `files:delete` for the file. No body. Returns `204 No Content`, or
+`404` if the file does not exist.
 This handler can delete either a completed file or an unfinished upload.
 Deletion removes metadata and associated permissions. Physical blobs remain
 eligible for reference-aware garbage collection.
 
 ### GET /v1/files/:id/content
 
-No body. Returns `200 OK` with raw file bytes reconstructed from blobs in
-position order. An unfinished or nonexistent file returns `404`.
+Requires `files:read` for the file. No body. Returns `200 OK` with raw file
+bytes reconstructed from blobs in position order. An unfinished or nonexistent
+file returns `404`.
 
 The handler sets these content headers:
 
@@ -299,11 +316,11 @@ they cannot be replaced with a JSON error response.
 
 ### HEAD /v1/files/:id/content
 
-No body. Returns `200 OK` with the same content headers as a full download,
-without reading blobs or returning file contents. The content handler returns
-`400`, `404`, or `500` without a body on parameter, lookup, or database errors.
-Authentication middleware runs first and may reject the request before this
-handler is reached.
+Requires `files:read` for the file. No body. Returns `200 OK` with the same
+content headers as a full download, without reading blobs or returning file
+contents. The content handler returns `400`, `404`, or `500` without a body on
+parameter, lookup, or database errors. Authentication and permission middleware
+run first and return JSON errors if they reject the request.
 
 ## Resumable uploads
 
@@ -323,7 +340,9 @@ Request:
 Owner ID must be a UUID referring to an existing user. Name must be nonblank
 and at most 500 characters; type must be nonblank and at most 255 characters.
 Size must be nonnegative; an omitted size currently defaults to zero. Invalid
-fields return `422`; a nonexistent owner currently produces `500`.
+fields return `422`. The owner ID must equal the authenticated user's ID;
+otherwise the response is `403`. A nonexistent authenticated owner currently
+produces `500`.
 
 Returns `200 OK` with a `file` envelope, not `201` or an `upload` envelope.
 The shared file shape is used with `status: "uploading"`. No `Location` header
@@ -334,7 +353,7 @@ There is no HTTP endpoint for replacing an existing file's contents:
 
 ### GET /v1/uploads/:file_id
 
-No body. Returns `200 OK`:
+Requires `files:read` for the upload. No body. Returns `200 OK`:
 
 ```json
 {
@@ -359,7 +378,8 @@ Parts are ordered by position. An upload without parts has `parts: []` and
 
 ### PUT /v1/uploads/:file_id/parts/:position
 
-Request body is raw part bytes, conventionally sent as
+Requires `files:write` for the upload. Request body is raw part bytes,
+conventionally sent as
 `Content-Type: application/octet-stream`. Position is a nonnegative, zero-based
 integer. Parts may be uploaded concurrently and out of order.
 
@@ -384,13 +404,15 @@ the same position.
 
 ### DELETE /v1/uploads/:file_id/parts/:position
 
-No body. Returns `204 No Content`. Negative positions return `400`. A missing
-part, or a completed, canceled, or nonexistent upload, returns `404`.
+Requires `files:write` for the upload. No body. Returns `204 No Content`.
+Negative positions return `400`. A missing part, or a completed, canceled, or
+nonexistent upload, returns `404`.
 Removing a part does not renumber later positions.
 
 ### POST /v1/uploads/:file_id/complete
 
-No body. Completion requires contiguous positions starting at zero, exactly
+Requires `files:write` for the upload. No body. Completion requires contiguous
+positions starting at zero, exactly
 `BlobsMaxSize` bytes in every non-final part, at most `BlobsMaxSize` bytes in the
 final part, and a total size matching the declared size. An empty file may be
 completed with no parts when its declared size is zero.
@@ -403,8 +425,9 @@ Repeating completion for an already completed file returns that file with
 
 ### DELETE /v1/uploads/:file_id
 
-No body. Returns `204 No Content`. Canceling removes unfinished metadata and
-blob associations; unreferenced physical blobs are eligible for cleanup.
+Requires `files:delete` for the upload. No body. Returns `204 No Content`.
+Canceling removes unfinished metadata and blob associations; unreferenced
+physical blobs are eligible for cleanup.
 A completed, already canceled, or nonexistent upload returns `404`.
 
 ## File permissions
@@ -415,9 +438,9 @@ being changed. Ownership is checked using `files.owner_id`.
 
 Allowed codes are `files:read`, `files:write`, and `files:delete`. They are
 independent stored permissions; no implication between codes is implemented.
-These endpoints only manage records. Codes are not yet enforced on file or
-upload operations. The owner's access to permissions management is based on
-ownership, not these rows; changing rows does not change `owner_id`.
+The codes are enforced on file and upload operations as described above. The
+owner's access is implicit and based on ownership, not these rows; changing
+rows does not change `owner_id`.
 
 Common failures:
 

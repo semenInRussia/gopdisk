@@ -35,6 +35,103 @@ func TestValidatePermissionCodes(t *testing.T) {
 	}
 }
 
+func TestPermissionsHasForFile(t *testing.T) {
+	failure := errors.New("query failed")
+	for _, scenario := range []string{"allowed", "denied", "missing file", "database error"} {
+		t.Run(scenario, func(t *testing.T) {
+			files, mock := newFileModelMock(t)
+			model := PermissionsModel{db: files.db}
+			expectation := mock.ExpectQuery(regexp.QuoteMeta(`SELECT f.owner_id = $2 OR EXISTS (
+				SELECT 1 FROM file_permissions p
+				WHERE p.file_id = f.id AND p.user_id = $2 AND p.code = $3
+			) FROM files f WHERE f.id = $1`)).WithArgs(FileID("file"), UserID("user"), PermissionRead)
+			var want error
+			switch scenario {
+			case "missing file":
+				expectation.WillReturnRows(sqlmock.NewRows([]string{"allowed"}))
+				want = ErrFileNotFound
+			case "database error":
+				expectation.WillReturnError(failure)
+				want = failure
+			default:
+				expectation.WillReturnRows(sqlmock.NewRows([]string{"allowed"}).AddRow(scenario == "allowed"))
+			}
+			allowed, err := model.HasForFile(context.Background(), "file", "user", PermissionRead)
+			if allowed != (scenario == "allowed") || !errors.Is(err, want) {
+				t.Fatalf("got %v, %v; want error %v", allowed, err, want)
+			}
+		})
+	}
+}
+
+func TestPostgresPermissionsAccess(t *testing.T) {
+	db := getDatabase(t)
+	ctx := context.Background()
+	users := UserModel{db: db}
+	permissions := PermissionsModel{db: db}
+	newUser := func(name string) UserID {
+		t.Helper()
+		user, err := users.New(ctx, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := users.Delete(ctx, user.ID); err != nil {
+				t.Error(err)
+			}
+		})
+		return user.ID
+	}
+	owner, reader, stranger := newUser("Owner"), newUser("Reader"), newUser("Stranger")
+	newFile := func() FileID {
+		t.Helper()
+		id := GenerateFileID()
+		_, err := db.ExecContext(ctx, `INSERT INTO files (id, name, owner_id, filetype, size, status) VALUES ($1, 'test', $2, 'TXT', 0, 'ready')`, id, owner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if _, err := db.ExecContext(ctx, `DELETE FROM files WHERE id = $1`, id); err != nil {
+				t.Error(err)
+			}
+		})
+		return id
+	}
+	file, otherFile := newFile(), newFile()
+	check := func(fileID FileID, userID UserID, code string, want bool) {
+		t.Helper()
+		allowed, err := permissions.HasForFile(ctx, fileID, userID, code)
+		if err != nil || allowed != want {
+			t.Fatalf("file=%s user=%s code=%s: got %v, %v; want %v", fileID, userID, code, allowed, err, want)
+		}
+	}
+	for _, code := range []string{PermissionRead, PermissionWrite, PermissionDelete} {
+		check(file, owner, code, true)
+		check(file, reader, code, false)
+	}
+	if err := permissions.SetForUser(ctx, file, reader, []string{PermissionRead}); err != nil {
+		t.Fatal(err)
+	}
+	check(file, reader, PermissionRead, true)
+	check(file, reader, PermissionWrite, false)
+	check(file, reader, PermissionDelete, false)
+	check(otherFile, reader, PermissionRead, false)
+	check(file, stranger, PermissionRead, false)
+	if err := permissions.SetForUser(ctx, file, reader, []string{PermissionWrite}); err != nil {
+		t.Fatal(err)
+	}
+	check(file, reader, PermissionRead, false)
+	check(file, reader, PermissionWrite, true)
+	if err := permissions.DeleteForUser(ctx, file, reader); err != nil {
+		t.Fatal(err)
+	}
+	check(file, reader, PermissionWrite, false)
+	check(file, owner, PermissionWrite, true)
+	if _, err := permissions.HasForFile(ctx, GenerateFileID(), reader, PermissionRead); !errors.Is(err, ErrFileNotFound) {
+		t.Fatalf("got %v, want ErrFileNotFound", err)
+	}
+}
+
 func TestPermissionsGetAllForFile(t *testing.T) {
 	for _, scenario := range []string{"rows", "empty", "query error", "scan error", "iteration error"} {
 		t.Run(scenario, func(t *testing.T) {

@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+
+	"github.com/google/uuid"
 )
 
 // get id from request params, find it in DB. Handler errors and return file and occured error (if can).
@@ -155,6 +157,12 @@ func (app *Application) filesUploadsPostHandler(w http.ResponseWriter, r *http.R
 		app.writeValidatorErrors(w, v)
 		return
 	}
+
+	if uuid.MustParse(input.OwnerId).String() != string(app.contextGetUser(r).ID) {
+		app.notPermittedResponse(w)
+		return
+	}
+	file.OwnerID = app.contextGetUser(r).ID
 
 	err = app.storage.Files.Insert(r.Context(), &file)
 

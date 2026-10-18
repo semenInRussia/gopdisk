@@ -15,6 +15,30 @@ import (
 
 const testAuthenticationToken = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
+const filePermissionQuery = `SELECT f.owner_id = $2 OR EXISTS (
+	SELECT 1 FROM file_permissions p
+	WHERE p.file_id = f.id AND p.user_id = $2 AND p.code = $3
+	) FROM files f WHERE f.id = $1`
+
+func expectFilePermission(mock sqlmock.Sqlmock, fileID, code string, allowed bool) {
+	mock.ExpectQuery(regexp.QuoteMeta(filePermissionQuery)).
+		WithArgs(data.FileID(fileID), data.UserID("baab6197-3e2d-4969-8492-247bbba900dc"), code).
+		WillReturnRows(sqlmock.NewRows([]string{"allowed"}).AddRow(allowed))
+}
+
+func newFileAuthorizedTestApplication(t *testing.T, fileID, code string) (*Application, sqlmock.Sqlmock) {
+	t.Helper()
+	app, mock, _ := newFileAuthorizedTestApplicationWithStoragePath(t, fileID, code)
+	return app, mock
+}
+
+func newFileAuthorizedTestApplicationWithStoragePath(t *testing.T, fileID, code string) (*Application, sqlmock.Sqlmock, string) {
+	t.Helper()
+	app, mock, path := newAuthenticatedTestApplicationWithStoragePath(t)
+	expectFilePermission(mock, fileID, code, true)
+	return app, mock, path
+}
+
 func expectAuthentication(mock sqlmock.Sqlmock, activated bool) {
 	hash := sha256.Sum256([]byte(testAuthenticationToken))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT u.id, u.name, u.email, u.password_hash, u.activated

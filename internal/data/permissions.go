@@ -26,6 +26,21 @@ type PermissionsModel struct {
 	db *sql.DB
 }
 
+// HasForFile grants owners access without explicit permission rows.
+func (m PermissionsModel) HasForFile(ctx context.Context, fileID FileID, userID UserID, code string) (bool, error) {
+	var allowed bool
+	err := m.db.QueryRowContext(ctx, `
+		SELECT f.owner_id = $2 OR EXISTS (
+			SELECT 1 FROM file_permissions p
+			WHERE p.file_id = f.id AND p.user_id = $2 AND p.code = $3
+		)
+		FROM files f WHERE f.id = $1`, fileID, userID, code).Scan(&allowed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrFileNotFound
+	}
+	return allowed, err
+}
+
 func ValidatePermissionCodes(v *validator.Validator, codes []string) {
 	v.Check("codes", codes != nil, "must be provided as an array")
 	seen := make(map[string]bool)

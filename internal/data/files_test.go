@@ -373,6 +373,10 @@ func TestAddDataBackPreservesOrderAcrossWorkerBatches(t *testing.T) {
 }
 
 func TestCompleteRequiresDeclaredSize(t *testing.T) {
+	previousMaxPartSize := blobs.BlobsMaxSize
+	blobs.BlobsMaxSize = 4
+	t.Cleanup(func() { blobs.BlobsMaxSize = previousMaxPartSize })
+
 	s := getStorage(t)
 	user, err := s.Users.New(context.Background(), "Kotik")
 	if err != nil {

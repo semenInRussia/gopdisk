@@ -633,7 +633,7 @@ func TestFilesGetEndpoint(t *testing.T) {
 	query := regexp.QuoteMeta("SELECT id, name, filetype, owner_id, status, size FROM files WHERE id = $1 AND status = $2")
 
 	t.Run("returns ready file", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionRead)
 		mock.ExpectQuery(query).
 			WithArgs(data.FileID(fileID), data.FileStatusReady).
 			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "filetype", "owner_id", "status", "size"}).
@@ -651,7 +651,7 @@ func TestFilesGetEndpoint(t *testing.T) {
 	})
 
 	t.Run("returns not found", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionRead)
 		mock.ExpectQuery(query).
 			WithArgs(data.FileID(fileID), data.FileStatusReady).
 			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "filetype", "owner_id", "status", "size"}))
@@ -662,7 +662,7 @@ func TestFilesGetEndpoint(t *testing.T) {
 	})
 
 	t.Run("returns server error", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionRead)
 		mock.ExpectQuery(query).
 			WithArgs(data.FileID(fileID), data.FileStatusReady).
 			WillReturnError(errors.New("select failed"))
@@ -691,7 +691,7 @@ func TestFilesUploadsPatchEndpoint(t *testing.T) {
 	}
 
 	t.Run("routes documented file path", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionWrite)
 		expectFile(mock)
 		mock.ExpectExec(updateQuery).
 			WithArgs("holiday.mov", data.FileID(fileID), data.FileStatusReady).
@@ -941,7 +941,7 @@ func TestFilesUploadGetEndpoint(t *testing.T) {
 	columns := []string{"id", "owner_id", "name", "filetype", "status", "file_size", "position", "blob_size"}
 
 	t.Run("returns upload progress with ordered parts", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionRead)
 		mock.ExpectQuery(query).
 			WithArgs(data.FileID(fileID), data.FileStatusUploading).
 			WillReturnRows(sqlmock.NewRows(columns).
@@ -975,7 +975,7 @@ func TestFilesUploadGetEndpoint(t *testing.T) {
 	})
 
 	t.Run("returns an empty parts array", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionRead)
 		mock.ExpectQuery(query).
 			WithArgs(data.FileID(fileID), data.FileStatusUploading).
 			WillReturnRows(sqlmock.NewRows(columns).
@@ -999,7 +999,7 @@ func TestFilesUploadGetEndpoint(t *testing.T) {
 	})
 
 	t.Run("returns not found for a missing or completed upload", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionRead)
 		mock.ExpectQuery(query).
 			WithArgs(data.FileID(fileID), data.FileStatusUploading).
 			WillReturnRows(sqlmock.NewRows(columns))
@@ -1018,7 +1018,7 @@ func TestFilesUploadGetEndpoint(t *testing.T) {
 	})
 
 	t.Run("returns server error on query failure", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionRead)
 		mock.ExpectQuery(query).
 			WithArgs(data.FileID(fileID), data.FileStatusUploading).
 			WillReturnError(errors.New("select failed"))
@@ -1086,7 +1086,7 @@ func TestUploadsPartsPutEndpoint(t *testing.T) {
 	}
 
 	t.Run("creates a new part", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionWrite)
 		body := []byte("new part")
 		expectBlobLookup(mock, false)
 		expectPartStored(mock, body)
@@ -1097,7 +1097,7 @@ func TestUploadsPartsPutEndpoint(t *testing.T) {
 	})
 
 	t.Run("replaces an existing part", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionWrite)
 		body := []byte("replacement")
 		expectBlobLookup(mock, true)
 		expectPartStored(mock, body)
@@ -1116,7 +1116,7 @@ func TestUploadsPartsPutEndpoint(t *testing.T) {
 	})
 
 	t.Run("rejects a nonnumeric position", func(t *testing.T) {
-		app, _ := newAuthenticatedTestApplication(t)
+		app, _ := newFileAuthorizedTestApplication(t, fileID, data.PermissionWrite)
 
 		recorder := serveRequest(t, app, http.MethodPut, "/v1/uploads/"+fileID+"/parts/not-a-number", []byte("part"))
 
@@ -1124,7 +1124,7 @@ func TestUploadsPartsPutEndpoint(t *testing.T) {
 	})
 
 	t.Run("rejects a negative position", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionWrite)
 		mock.ExpectQuery(getBlobQuery).
 			WithArgs(data.FileID(fileID), -1).
 			WillReturnRows(sqlmock.NewRows(blobColumns))
@@ -1135,7 +1135,7 @@ func TestUploadsPartsPutEndpoint(t *testing.T) {
 	})
 
 	t.Run("rejects an empty part", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionWrite)
 		expectBlobLookup(mock, false)
 
 		recorder := serveRequest(t, app, http.MethodPut, fmt.Sprintf("/v1/uploads/%s/parts/%d", fileID, position), nil)
@@ -1148,7 +1148,7 @@ func TestUploadsPartsPutEndpoint(t *testing.T) {
 		blobs.BlobsMaxSize = 4
 		t.Cleanup(func() { blobs.BlobsMaxSize = previousMaxPartSize })
 
-		app, mock, storagePath := newAuthenticatedTestApplicationWithStoragePath(t)
+		app, mock, storagePath := newFileAuthorizedTestApplicationWithStoragePath(t, fileID, data.PermissionWrite)
 		expectBlobLookup(mock, false)
 		expectPartStored(mock, []byte("1234"))
 
@@ -1172,7 +1172,7 @@ func TestUploadsPartsPutEndpoint(t *testing.T) {
 	})
 
 	t.Run("returns not found for a missing or completed upload", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionWrite)
 		expectBlobLookup(mock, false)
 		mock.ExpectBegin()
 		mock.ExpectQuery(lockUploadQuery).
@@ -1192,7 +1192,7 @@ func TestUploadsPartsPutEndpoint(t *testing.T) {
 	})
 
 	t.Run("returns server error when storing metadata fails", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionWrite)
 		expectBlobLookup(mock, false)
 		mock.ExpectBegin().WillReturnError(errors.New("begin failed"))
 
@@ -1218,7 +1218,7 @@ func TestUploadsPartsDeleteEndpoint(t *testing.T) {
 	}
 
 	t.Run("removes an uploaded part", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionWrite)
 		expectUploadLock(mock)
 		mock.ExpectExec(deletePartQuery).
 			WithArgs(data.FileID(fileID), position).
@@ -1244,7 +1244,7 @@ func TestUploadsPartsDeleteEndpoint(t *testing.T) {
 	})
 
 	t.Run("rejects a nonnumeric position", func(t *testing.T) {
-		app, _ := newAuthenticatedTestApplication(t)
+		app, _ := newFileAuthorizedTestApplication(t, fileID, data.PermissionWrite)
 
 		recorder := serveRequest(t, app, http.MethodDelete, "/v1/uploads/"+fileID+"/parts/not-a-number", nil)
 
@@ -1252,7 +1252,7 @@ func TestUploadsPartsDeleteEndpoint(t *testing.T) {
 	})
 
 	t.Run("rejects a negative position", func(t *testing.T) {
-		app, _ := newAuthenticatedTestApplication(t)
+		app, _ := newFileAuthorizedTestApplication(t, fileID, data.PermissionWrite)
 
 		recorder := serveRequest(t, app, http.MethodDelete, "/v1/uploads/"+fileID+"/parts/-1", nil)
 
@@ -1260,7 +1260,7 @@ func TestUploadsPartsDeleteEndpoint(t *testing.T) {
 	})
 
 	t.Run("returns not found for a missing or completed upload", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionWrite)
 		mock.ExpectBegin()
 		mock.ExpectQuery(lockUploadQuery).
 			WithArgs(data.FileID(fileID), data.FileStatusUploading).
@@ -1273,7 +1273,7 @@ func TestUploadsPartsDeleteEndpoint(t *testing.T) {
 	})
 
 	t.Run("returns not found for a missing part", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionWrite)
 		expectUploadLock(mock)
 		mock.ExpectExec(deletePartQuery).
 			WithArgs(data.FileID(fileID), position).
@@ -1286,7 +1286,7 @@ func TestUploadsPartsDeleteEndpoint(t *testing.T) {
 	})
 
 	t.Run("returns server error on delete failure", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionWrite)
 		expectUploadLock(mock)
 		mock.ExpectExec(deletePartQuery).
 			WithArgs(data.FileID(fileID), position).
@@ -1337,7 +1337,7 @@ func TestUploadsCompletePostEndpoint(t *testing.T) {
 	}
 
 	t.Run("validates and completes an upload", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionWrite)
 		mock.ExpectBegin()
 		mock.ExpectQuery(lockUploadQuery).
 			WithArgs(data.FileID(fileID), data.FileStatusUploading).
@@ -1359,7 +1359,7 @@ func TestUploadsCompletePostEndpoint(t *testing.T) {
 	})
 
 	t.Run("is idempotent for a completed upload", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionWrite)
 		mock.ExpectBegin()
 		mock.ExpectQuery(lockUploadQuery).
 			WithArgs(data.FileID(fileID), data.FileStatusUploading).
@@ -1373,7 +1373,7 @@ func TestUploadsCompletePostEndpoint(t *testing.T) {
 	})
 
 	t.Run("rejects invalid part ordering", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionWrite)
 		mock.ExpectBegin()
 		mock.ExpectQuery(lockUploadQuery).
 			WithArgs(data.FileID(fileID), data.FileStatusUploading).
@@ -1405,7 +1405,7 @@ func TestUploadsCompletePostEndpoint(t *testing.T) {
 	})
 
 	t.Run("returns not found for a missing upload", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionWrite)
 		mock.ExpectBegin()
 		mock.ExpectQuery(lockUploadQuery).
 			WithArgs(data.FileID(fileID), data.FileStatusUploading).
@@ -1421,7 +1421,7 @@ func TestUploadsCompletePostEndpoint(t *testing.T) {
 	})
 
 	t.Run("returns server error on storage failure", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionWrite)
 		mock.ExpectBegin().WillReturnError(errors.New("begin failed"))
 
 		recorder := serveRequest(t, app, http.MethodPost, target, nil)
@@ -1436,7 +1436,7 @@ func TestUploadsDeleteEndpoint(t *testing.T) {
 	target := "/v1/uploads/" + fileID
 
 	t.Run("cancels an unfinished upload", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionDelete)
 		mock.ExpectExec(deleteQuery).
 			WithArgs(data.FileID(fileID), data.FileStatusUploading).
 			WillReturnResult(sqlmock.NewResult(0, 1))
@@ -1460,7 +1460,7 @@ func TestUploadsDeleteEndpoint(t *testing.T) {
 	})
 
 	t.Run("returns not found for a missing or completed upload", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionDelete)
 		mock.ExpectExec(deleteQuery).
 			WithArgs(data.FileID(fileID), data.FileStatusUploading).
 			WillReturnResult(sqlmock.NewResult(0, 0))
@@ -1471,7 +1471,7 @@ func TestUploadsDeleteEndpoint(t *testing.T) {
 	})
 
 	t.Run("returns server error on delete failure", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionDelete)
 		mock.ExpectExec(deleteQuery).
 			WithArgs(data.FileID(fileID), data.FileStatusUploading).
 			WillReturnError(errors.New("delete failed"))
@@ -1508,7 +1508,7 @@ func TestFilesContentGetEndpoint(t *testing.T) {
 	}
 
 	t.Run("streams blobs in order", func(t *testing.T) {
-		app, mock, storagePath := newAuthenticatedTestApplicationWithStoragePath(t)
+		app, mock, storagePath := newFileAuthorizedTestApplicationWithStoragePath(t, fileID, data.PermissionRead)
 		expectReadableFile(mock)
 		mock.ExpectQuery(selectBlobsQuery).
 			WithArgs(data.FileID(fileID)).
@@ -1539,7 +1539,7 @@ func TestFilesContentGetEndpoint(t *testing.T) {
 	})
 
 	t.Run("returns an empty ready file", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionRead)
 		expectReadableFile(mock)
 		mock.ExpectQuery(selectBlobsQuery).
 			WithArgs(data.FileID(fileID)).
@@ -1556,7 +1556,7 @@ func TestFilesContentGetEndpoint(t *testing.T) {
 	})
 
 	t.Run("returns not found before streaming", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionRead)
 		mock.ExpectQuery(selectFileQuery).
 			WithArgs(data.FileID(fileID), data.FileStatusReady).
 			WillReturnRows(sqlmock.NewRows([]string{"id", "name", "filetype", "owner_id", "status", "size"}))
@@ -1567,7 +1567,7 @@ func TestFilesContentGetEndpoint(t *testing.T) {
 	})
 
 	t.Run("returns server error before streaming", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionRead)
 		mock.ExpectQuery(selectFileQuery).
 			WithArgs(data.FileID(fileID), data.FileStatusReady).
 			WillReturnError(errors.New("select failed"))
@@ -1578,7 +1578,7 @@ func TestFilesContentGetEndpoint(t *testing.T) {
 	})
 
 	t.Run("does not write a second response after streaming starts", func(t *testing.T) {
-		app, mock, storagePath := newAuthenticatedTestApplicationWithStoragePath(t)
+		app, mock, storagePath := newFileAuthorizedTestApplicationWithStoragePath(t, fileID, data.PermissionRead)
 		var logs bytes.Buffer
 		app.logger = log.New(&logs, "", 0)
 		expectReadableFile(mock)
@@ -1629,7 +1629,7 @@ func TestFilesContentHeadEndpoint(t *testing.T) {
 	fileColumns := []string{"id", "name", "filetype", "owner_id", "status", "size"}
 
 	t.Run("returns download metadata without reading blobs", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionRead)
 		mock.ExpectQuery(selectFileQuery).
 			WithArgs(data.FileID(fileID), data.FileStatusReady).
 			WillReturnRows(sqlmock.NewRows(fileColumns).
@@ -1652,7 +1652,7 @@ func TestFilesContentHeadEndpoint(t *testing.T) {
 	})
 
 	t.Run("returns metadata for an empty ready file", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionRead)
 		mock.ExpectQuery(selectFileQuery).
 			WithArgs(data.FileID(fileID), data.FileStatusReady).
 			WillReturnRows(sqlmock.NewRows(fileColumns).
@@ -1672,7 +1672,7 @@ func TestFilesContentHeadEndpoint(t *testing.T) {
 	})
 
 	t.Run("returns not found without a body", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionRead)
 		mock.ExpectQuery(selectFileQuery).
 			WithArgs(data.FileID(fileID), data.FileStatusReady).
 			WillReturnRows(sqlmock.NewRows(fileColumns))
@@ -1688,7 +1688,7 @@ func TestFilesContentHeadEndpoint(t *testing.T) {
 	})
 
 	t.Run("returns server error without a body", func(t *testing.T) {
-		app, mock := newAuthenticatedTestApplication(t)
+		app, mock := newFileAuthorizedTestApplication(t, fileID, data.PermissionRead)
 		mock.ExpectQuery(selectFileQuery).
 			WithArgs(data.FileID(fileID), data.FileStatusReady).
 			WillReturnError(errors.New("select failed"))

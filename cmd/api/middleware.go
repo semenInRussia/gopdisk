@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"gopherdisk/internal/data"
 	"gopherdisk/internal/validator"
 	"net/http"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 func (app *Application) authenticate(next http.Handler) http.Handler {
@@ -64,6 +67,48 @@ func (app *Application) requireActivatedUser(next http.HandlerFunc) http.Handler
 	return app.requireAuthenticatedUser(func(w http.ResponseWriter, r *http.Request) {
 		if !app.contextGetUser(r).Activated {
 			app.inactiveAccountResponse(w)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (app *Application) requireCurrentUser(next http.HandlerFunc) http.HandlerFunc {
+	return app.requireActivatedUser(func(w http.ResponseWriter, r *http.Request) {
+		id, err := app.getUUIDParam(r, "id")
+		if err != nil {
+			app.badRequestErrorResponse(w, err.Error())
+			return
+		}
+		if uuid.MustParse(id).String() != string(app.contextGetUser(r).ID) {
+			app.notPermittedResponse(w)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (app *Application) requireFilePermission(param, code string, next http.HandlerFunc) http.HandlerFunc {
+	return app.requireActivatedUser(func(w http.ResponseWriter, r *http.Request) {
+		id, err := app.getUUIDParam(r, param)
+		if err != nil {
+			app.badRequestErrorResponse(w, err.Error())
+			return
+		}
+		allowed, err := app.storage.Permissions.HasForFile(r.Context(), data.FileID(id), app.contextGetUser(r).ID, code)
+		if err != nil {
+			switch {
+			case errors.Is(err, data.ErrFileNotFound):
+				app.notFoundResponse(w, r)
+			case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+				return
+			default:
+				app.serverErrorResponse(w, err)
+			}
+			return
+		}
+		if !allowed {
+			app.notPermittedResponse(w)
 			return
 		}
 		next.ServeHTTP(w, r)
