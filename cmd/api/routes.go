@@ -47,6 +47,11 @@ func (app *Application) routes() http.Handler {
 	router.HandlerFunc(http.MethodPost, "/v1/uploads/:file_id/complete", app.requireActivatedUser(app.uploadsCompletePostHandler))
 	router.HandlerFunc(http.MethodDelete, "/v1/uploads/:file_id", app.requireActivatedUser(app.uploadsDeleteHandler))
 
+	// File permissions
+	router.HandlerFunc(http.MethodGet, "/v1/files/:id/permissions", app.requireActivatedUser(app.permissionsGetHandler))
+	router.HandlerFunc(http.MethodPut, "/v1/files/:id/permissions/:user_id", app.requireActivatedUser(app.permissionsPutHandler))
+	router.HandlerFunc(http.MethodDelete, "/v1/files/:id/permissions/:user_id", app.requireActivatedUser(app.permissionsDeleteHandler))
+
 	// Tokens
 	router.HandlerFunc(http.MethodPost, "/v1/tokens/authentication", app.tokensAuthenticationPostHandler)
 

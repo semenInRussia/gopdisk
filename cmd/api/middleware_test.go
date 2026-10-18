@@ -100,6 +100,9 @@ func TestProtectedRoutes(t *testing.T) {
 		{http.MethodDelete, "/v1/uploads/" + id + "/parts/0"},
 		{http.MethodPost, "/v1/uploads/" + id + "/complete"},
 		{http.MethodDelete, "/v1/uploads/" + id},
+		{http.MethodGet, "/v1/files/" + id + "/permissions"},
+		{http.MethodPut, "/v1/files/" + id + "/permissions/" + id},
+		{http.MethodDelete, "/v1/files/" + id + "/permissions/" + id},
 	} {
 		for _, authenticated := range []bool{false, true} {
 			t.Run(route.method+" "+route.path+fmt.Sprint(" authenticated=", authenticated), func(t *testing.T) {

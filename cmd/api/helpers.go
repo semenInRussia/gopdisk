@@ -160,6 +160,10 @@ func (app *Application) inactiveAccountResponse(w http.ResponseWriter) {
 	app.errorResponse(w, "your account must be activated to access this resource", http.StatusForbidden)
 }
 
+func (app *Application) notPermittedResponse(w http.ResponseWriter) {
+	app.errorResponse(w, "your user account doesn't have the necessary permissions to access this resource", http.StatusForbidden)
+}
+
 func (app *Application) writeValidatorErrors(w http.ResponseWriter, v *validator.Validator) {
 	status := http.StatusUnprocessableEntity
 	if v.IsValid() {

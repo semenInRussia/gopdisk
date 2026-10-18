@@ -1,31 +1,99 @@
 # GopherDisk HTTP API
 
-GopherDisk provides a local HTTP API for managing users, logical files, and
-resumable uploads. File metadata is stored in PostgreSQL. File contents are
-split into ordered, content-addressed blobs on the local filesystem.
-
-This document defines the production API contract for version `v1`.
+This document describes the currently implemented API in `cmd/api`, including
+its current limitations. All endpoints use the `/v1` prefix. User and file IDs
+are UUID strings. This is a description of current behavior, not a list of
+planned features.
 
 ## Conventions
 
-### Base path
+### Requests and responses
 
-All endpoints use the `/v1` prefix.
+JSON requests should use `Content-Type: application/json`. JSON responses use
+`Content-Type: application/json`. The server does not currently enforce request
+Content-Type or return `415` for an unsupported media type.
 
-### Content types
+JSON bodies must contain a single JSON value and no unknown fields. The JSON
+body limit is 1,048,576 bytes; exceeding it returns `400`, not `413`. Unless a
+body is shown below, no request body is required. `204` responses have no body.
 
-- JSON requests use `Content-Type: application/json`.
-- File parts and downloads use `application/octet-stream` unless a file has a
-  more specific media type.
-- All JSON responses are UTF-8 encoded.
+There is no pagination or pagination metadata. Query parameters such as
+`limit`, `cursor`, and `cascade` are not implemented. `Idempotency-Key` is not
+implemented.
 
-### IDs
+### Authentication and access
 
-User IDs and file IDs are UUID strings. Invalid UUIDs return `400 Bad Request`.
+These endpoints can be used without an authentication token:
 
-### Resource envelopes
+- `GET /v1/healthcheck`
+- `POST /v1/users`
+- `PUT /v1/users/activated`
+- `POST /v1/tokens/authentication`
 
-Successful JSON responses wrap their primary resource:
+All other documented endpoints require an authenticated, activated account:
+
+```http
+Authorization: Bearer <token>
+```
+
+Use the 26-character authentication token returned by the token endpoint, not
+the activation token sent by email. Authentication middleware sets
+`Vary: Authorization`. A supplied malformed, unknown, expired, or wrong-scope
+token returns `401` even on public endpoints. No token on a protected endpoint
+returns `401`; a valid token for an inactive user returns `403`.
+Authentication-related `401` responses from middleware include
+`WWW-Authenticate: Bearer`.
+
+Only permissions management currently checks that the caller owns the file.
+Other user, file, and upload handlers require activation but do not check
+ownership or enforce stored file permissions. Upload creation still takes
+`owner_id` from the request body.
+
+### Errors
+
+Ordinary errors use a string, without a machine-readable error code:
+
+```json
+{"error": "the requested resource could not be found"}
+```
+
+Validation errors use an object keyed by field name:
+
+```json
+{"error": {"codes": "must not contain duplicates"}}
+```
+
+| Status | Current meaning |
+| --- | --- |
+| `400` | Invalid JSON, unknown field, oversized JSON body, invalid path parameter, or empty upload part. |
+| `401` | Missing authentication on a protected route, invalid token, or invalid login credentials. |
+| `403` | Inactive account, or non-owner accessing permissions management. |
+| `404` | Missing resource, unavailable file/upload state, or unknown route. |
+| `405` | Unsupported method for a registered path. |
+| `409` | Upload completion fails part or size validation. |
+| `422` | Invalid fields, duplicate registration email, or invalid activation token. |
+| `500` | Unexpected database, filesystem, or server error. |
+
+Invalid UUID path parameters return `400` after authentication and any preceding
+access checks. Endpoint-specific exceptions are documented below.
+
+### Shared response objects
+
+A `user` object includes `id`, `name`, `email`, and `activated`. Passwords and
+password hashes are never returned:
+
+```json
+{
+    "user": {
+        "id": "baab6197-3e2d-4969-8492-247bbba900dc",
+        "name": "Kotik",
+        "email": "kotik@example.com",
+        "activated": true
+    }
+}
+```
+
+A logical `file` object contains metadata, not blob paths or contents:
 
 ```json
 {
@@ -40,294 +108,208 @@ Successful JSON responses wrap their primary resource:
 }
 ```
 
-Collections use the plural resource name and include pagination metadata:
-
-```json
-{
-    "files": [],
-    "pagination": {
-        "next_cursor": null
-    }
-}
-```
-
-### Errors
-
-Errors have a stable machine-readable code and a human-readable message:
-
-```json
-{
-    "error": {
-        "code": "file_not_found",
-        "message": "file not found"
-    }
-}
-```
-
-Validation errors may include field details:
-
-```json
-{
-    "error": {
-        "code": "validation_failed",
-        "message": "request validation failed",
-        "fields": {
-            "size": "must not be negative"
-        }
-    }
-}
-```
-
-Common status codes:
-
-| Status | Meaning                                                         |
-| ------ | --------------------------------------------------------------- |
-| `400`  | Malformed JSON, invalid UUID, cursor, range, or path parameter. |
-| `404`  | The requested user, file, upload, or part does not exist.       |
-| `409`  | The request conflicts with the resource's current state.        |
-| `413`  | A request body or uploaded part exceeds the allowed size.       |
-| `415`  | The request uses an unsupported content type.                   |
-| `416`  | A download range cannot be satisfied.                           |
-| `422`  | The request is well-formed but fails field validation.          |
-| `500`  | An unexpected database, filesystem, or server error occurred.   |
-
-### Pagination
-
-Collection endpoints accept:
-
-- `limit`: number of results, from `1` to `100`; default `25`;
-- `cursor`: opaque cursor returned by the preceding response.
-
-Clients must not parse or construct cursors.
-
-### Idempotency
-
-Part uploads are idempotent by file ID and position. Retrying the same `PUT`
-replaces that position without changing the order of other parts.
-
-Upload-creation requests may include an `Idempotency-Key` header. Repeating a
-request with the same key and body returns the original upload. Reusing the key
-with a different body returns `409 Conflict`.
+`size` is the logical size in bytes; status is `uploading` or `ready`.
+Collection responses use arrays, including `[]` when empty.
 
 ## Endpoint summary
 
-### Service
-
-| Method | Path              | Purpose                                      |
-| ------ | ----------------- | -------------------------------------------- |
-| `GET`  | `/v1/healthcheck` | Read service health and version information. |
-
-### Users
-
-| Method   | Path                    | Purpose                             |
-| -------- | ----------------------- | ----------------------------------- |
-| `POST`   | `/v1/users`             | Create a user.                      |
-| `GET`    | `/v1/users/:id`         | Read a user.                        |
-| `DELETE` | `/v1/users/:id`         | Delete a user.                      |
-| `GET`    | `/v1/users/:id/files`   | List the user's completed files.    |
-| `GET`    | `/v1/users/:id/uploads` | List the user's unfinished uploads. |
-
-### Files
-
-| Method   | Path                    | Purpose                                  |
-| -------- | ----------------------- | ---------------------------------------- |
-| `GET`    | `/v1/files/:id`         | Read completed file metadata.            |
-| `PATCH`  | `/v1/files/:id`         | Rename a completed file.                 |
-| `DELETE` | `/v1/files/:id`         | Delete a logical file.                   |
-| `GET`    | `/v1/files/:id/content` | Download file contents.                  |
-| `HEAD`   | `/v1/files/:id/content` | Read download metadata without the body. |
-
-### Uploads
-
-| Method   | Path                                   | Purpose                              |
-| -------- | -------------------------------------- | ------------------------------------ |
-| `POST`   | `/v1/files/upload`                     | Start a new-file upload.             |
-| `POST`   | `/v1/files/:id/upload`                 | Start an atomic content replacement. |
-| `GET`    | `/v1/uploads/:file_id`                 | Read upload progress.                |
-| `PUT`    | `/v1/uploads/:file_id/parts/:position` | Upload or replace a part.            |
-| `DELETE` | `/v1/uploads/:file_id/parts/:position` | Remove an uploaded part.             |
-| `POST`   | `/v1/uploads/:file_id/complete`        | Validate and complete an upload.     |
-| `DELETE` | `/v1/uploads/:file_id`                 | Cancel an unfinished upload.         |
+| Method | Path | Success response |
+| --- | --- | --- |
+| `GET` | `/v1/healthcheck` | `203`, health information |
+| `POST` | `/v1/users` | `202`, registration message |
+| `PUT` | `/v1/users/activated` | `200`, `user` |
+| `POST` | `/v1/tokens/authentication` | `201`, `authentication_token` |
+| `GET` | `/v1/users/:id` | `200`, `user` |
+| `DELETE` | `/v1/users/:id` | `204` |
+| `GET` | `/v1/users/:id/files` | `200`, `files` |
+| `GET` | `/v1/users/:id/uploads` | `200`, `files` |
+| `GET` | `/v1/files/:id` | `200`, `file` |
+| `PATCH` | `/v1/files/:id` | `200`, `file` |
+| `DELETE` | `/v1/files/:id` | `204` |
+| `GET` | `/v1/files/:id/content` | `200`, raw file bytes |
+| `HEAD` | `/v1/files/:id/content` | `200`, content headers only |
+| `POST` | `/v1/files/upload` | `200`, `file` in `uploading` status |
+| `GET` | `/v1/uploads/:file_id` | `200`, `upload` |
+| `PUT` | `/v1/uploads/:file_id/parts/:position` | `201` or `200`, `part` |
+| `DELETE` | `/v1/uploads/:file_id/parts/:position` | `204` |
+| `POST` | `/v1/uploads/:file_id/complete` | `200`, `file` |
+| `DELETE` | `/v1/uploads/:file_id` | `204` |
+| `GET` | `/v1/files/:id/permissions` | `200`, `permissions` |
+| `PUT` | `/v1/files/:id/permissions/:user_id` | `204` |
+| `DELETE` | `/v1/files/:id/permissions/:user_id` | `204` |
 
 ## Service
 
-### Get health
+### GET /v1/healthcheck
 
-```http
-GET /v1/healthcheck
-```
-
-Returns `200 OK` when the service can accept requests.
+No body. Returns `203 Non-Authoritative Information` (the current handler's
+status, not `200`):
 
 ```json
 {
     "status": "available",
     "version": "1.0.0",
-    "time": "2026-10-10T12:00:00Z"
+    "time": "2026-10-18T12:00:00Z"
 }
 ```
+
+This reports the running service; it does not probe the database or filesystem.
+
+## Registration, activation, and tokens
+
+### POST /v1/users
+
+Request:
+
+```json
+{
+    "name": "Kotik",
+    "email": "kotik@example.com",
+    "password": "long-enough-password"
+}
+```
+
+Name must be nonblank and at most 500 characters. Email is trimmed and
+lowercased, must match the email validator, and is limited to 500 characters.
+Password must be 8–72 bytes. Invalid fields and duplicate email return `422`.
+
+Returns `202 Accepted`, with no `Location` header or user object:
+
+```json
+{
+    "message": "an email will be sent to you containing activation instructions"
+}
+```
+
+The account starts with `activated: false`. An activation token valid for three
+days is sent by background email; the response does not guarantee delivery.
+
+### PUT /v1/users/activated
+
+Request:
+
+```json
+{"token": "ABCDEFGHIJKLMNOPQRSTUVWXYZ"}
+```
+
+The token must be 26 bytes long and must be an unexpired activation token.
+Returns `200 OK` with the shared `user` envelope and `activated: true`.
+Missing, malformed-length, unknown, expired, or consumed tokens return `422`.
+Successful activation consumes the user's activation tokens.
+
+### POST /v1/tokens/authentication
+
+Request:
+
+```json
+{
+    "email": "kotik@example.com",
+    "password": "long-enough-password"
+}
+```
+
+Returns `201 Created`:
+
+```json
+{
+    "authentication_token": {
+        "token": "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        "expiry": "2026-10-19T12:00:00Z"
+    }
+}
+```
+
+The token is valid for 24 hours. Invalid email format returns `422`.
+Unknown email, incorrect password, or an inactive account returns `401` with
+`{"error":"invalid authentication credentials"}`. This login error does not
+set `WWW-Authenticate`.
 
 ## Users
 
-### Create a user
+### GET /v1/users/:id
 
-```http
-POST /v1/users
-Content-Type: application/json
-```
+No body. Returns `200 OK` with the shared `user` envelope, or `404` for a
+nonexistent user.
 
-```json
-{
-    "name": "Kotik"
-}
-```
+### DELETE /v1/users/:id
 
-Returns `201 Created`, a `Location` header, and the created user:
+No body. Returns `204 No Content`, or `404` for a nonexistent user. There is no
+cascading-delete option for owned files. If the user still owns files or
+uploads, the database foreign key prevents deletion; the current handler
+reports this as `500`, not `409`.
 
-```json
-{
-    "user": {
-        "id": "baab6197-3e2d-4969-8492-247bbba900dc",
-        "name": "Kotik"
-    }
-}
-```
+### GET /v1/users/:id/files
 
-### Get a user
+No body. Returns `200 OK` with `{"files":[...]}`. Items use the shared file
+shape, have status `ready`, and are ordered by name and ID. An empty collection
+is `{"files":[]}`. There is no pagination metadata. A nonexistent user
+currently returns `400`, not `404`.
 
-```http
-GET /v1/users/:id
-```
+### GET /v1/users/:id/uploads
 
-Returns `200 OK` with a `user` envelope or `404 Not Found`.
-
-### Delete a user
-
-```http
-DELETE /v1/users/:id
-```
-
-Returns `204 No Content`. By default, deletion returns `409 Conflict` if the
-user still owns files or unfinished uploads.
-
-To delete the user and all owned logical files and uploads:
-
-```http
-DELETE /v1/users/:id?cascade=true
-```
-
-Physical blobs are removed only when no other logical file references them.
-
-### List a user's files
-
-```http
-GET /v1/users/:id/files?limit=25&cursor=opaque-cursor
-```
-
-Returns only files in `ready` status, ordered by name and ID.
-
-```json
-{
-    "files": [
-        {
-            "id": "32f11d17-b1f5-4fb0-94ca-614903665dff",
-            "name": "movie.mov",
-            "type": "video/quicktime",
-            "owner_id": "baab6197-3e2d-4969-8492-247bbba900dc",
-            "status": "ready",
-            "size": 104857600
-        }
-    ],
-    "pagination": {
-        "next_cursor": null
-    }
-}
-```
-
-### List a user's uploads
-
-```http
-GET /v1/users/:id/uploads?limit=25&cursor=opaque-cursor
-```
-
-Returns unfinished uploads in `uploading` status. Each item includes the
-declared size, received size, and uploaded part count.
+No body. Returns `200 OK` with `{"files":[...]}`, using the shared file shape,
+status `uploading`, ordered by name and ID. It does not return an `uploads`
+envelope, part counts, parts, or received sizes. For progress details, use
+`GET /v1/uploads/:file_id`. A nonexistent user currently returns `400`.
 
 ## Files
 
-### Get file metadata
+### GET /v1/files/:id
 
-```http
-GET /v1/files/:id
-```
+No body. Returns `200 OK` with the shared `file` envelope. Only completed files
+are returned; an unfinished or nonexistent file returns `404`.
 
-Returns metadata only for a completed file. An unfinished or nonexistent file
-returns `404 Not Found`; upload progress is available from the upload endpoint.
+### PATCH /v1/files/:id
 
-### Rename a file
-
-```http
-PATCH /v1/files/:id
-Content-Type: application/json
-```
+Request:
 
 ```json
-{
-    "name": "holiday.mov"
-}
+{"name": "holiday.mov"}
 ```
 
 Returns `200 OK` with the updated `file` envelope. Renaming changes metadata
-only and does not rewrite blobs.
+only. An unfinished or nonexistent file returns `404`. Name must be nonblank
+and at most 500 characters. The handler currently reuses the user-name
+validator, so name validation errors use the key `user`, not `name`.
 
-### Delete a file
+### DELETE /v1/files/:id
 
-```http
-DELETE /v1/files/:id
-```
+No body. Returns `204 No Content`, or `404` if the file does not exist.
+This handler can delete either a completed file or an unfinished upload.
+Deletion removes metadata and associated permissions. Physical blobs remain
+eligible for reference-aware garbage collection.
 
-Returns `204 No Content`. The logical file becomes unavailable immediately.
-Unreferenced physical blobs are eligible for cleanup; shared blobs remain.
+### GET /v1/files/:id/content
 
-### Download file contents
+No body. Returns `200 OK` with raw file bytes reconstructed from blobs in
+position order. An unfinished or nonexistent file returns `404`.
 
-```http
-GET /v1/files/:id/content
-```
-
-Returns the logical file reconstructed from its blobs in position order.
-
-Response headers include:
+The handler sets these content headers:
 
 ```http
 Content-Type: video/quicktime
 Content-Length: 104857600
-Content-Disposition: attachment; filename="movie.mov"
-Accept-Ranges: bytes
 ```
 
-Clients may resume downloads with a single byte range:
+Content-Type is the stored file `type`. The handler does not set
+`Content-Disposition` or `Accept-Ranges`. Byte ranges are not implemented:
+`Range` is ignored and the full file is returned, not `206` or `416`.
+Errors after streaming begins are logged and may leave an incomplete download;
+they cannot be replaced with a JSON error response.
 
-```http
-GET /v1/files/:id/content
-Range: bytes=16777216-
-```
+### HEAD /v1/files/:id/content
 
-A valid range returns `206 Partial Content` and `Content-Range`. An invalid or
-unsatisfiable range returns `416 Range Not Satisfiable`.
-
-`HEAD /v1/files/:id/content` returns the same download headers without a body.
-The server streams data and stops reading blobs when the client disconnects.
+No body. Returns `200 OK` with the same content headers as a full download,
+without reading blobs or returning file contents. The content handler returns
+`400`, `404`, or `500` without a body on parameter, lookup, or database errors.
+Authentication middleware runs first and may reject the request before this
+handler is reached.
 
 ## Resumable uploads
 
-### Start a new-file upload
+### POST /v1/files/upload
 
-```http
-POST /v1/files/upload
-Content-Type: application/json
-Idempotency-Key: client-generated-key
-```
+Request:
 
 ```json
 {
@@ -338,54 +320,21 @@ Idempotency-Key: client-generated-key
 }
 ```
 
-`size` is the total logical file size in bytes and must not be negative. The
-owner must exist.
+Owner ID must be a UUID referring to an existing user. Name must be nonblank
+and at most 500 characters; type must be nonblank and at most 255 characters.
+Size must be nonnegative; an omitted size currently defaults to zero. Invalid
+fields return `422`; a nonexistent owner currently produces `500`.
 
-Returns `201 Created`, a `Location` header pointing to the upload status
-endpoint, and an upload resource:
+Returns `200 OK` with a `file` envelope, not `201` or an `upload` envelope.
+The shared file shape is used with `status: "uploading"`. No `Location` header
+is set. Completed-file reads will not expose the file until completion.
 
-```json
-{
-    "upload": {
-        "file_id": "32f11d17-b1f5-4fb0-94ca-614903665dff",
-        "owner_id": "baab6197-3e2d-4969-8492-247bbba900dc",
-        "name": "movie.mov",
-        "type": "video/quicktime",
-        "status": "uploading",
-        "size": 104857600,
-        "received_size": 0,
-        "parts": []
-    }
-}
-```
+There is no HTTP endpoint for replacing an existing file's contents:
+`POST /v1/files/:id/upload` is not registered.
 
-The file is not visible through completed-file endpoints until completion.
+### GET /v1/uploads/:file_id
 
-### Start a content replacement
-
-```http
-POST /v1/files/:id/upload
-Content-Type: application/json
-```
-
-```json
-{
-    "size": 125829120,
-    "type": "video/quicktime"
-}
-```
-
-Returns `201 Created` with an upload resource. The existing file and its old
-contents remain readable until the replacement upload completes. Completion
-atomically swaps the blob list; a failed or canceled replacement leaves the
-existing file unchanged. Only one active replacement is allowed per file;
-another attempt returns `409 Conflict`.
-
-### Get upload progress
-
-```http
-GET /v1/uploads/:file_id
-```
+No body. Returns `200 OK`:
 
 ```json
 {
@@ -398,39 +347,25 @@ GET /v1/uploads/:file_id
         "size": 104857600,
         "received_size": 33554432,
         "parts": [
-            {
-                "position": 0,
-                "size": 16777216
-            },
-            {
-                "position": 1,
-                "size": 16777216
-            }
+            {"position": 0, "size": 16777216},
+            {"position": 1, "size": 16777216}
         ]
     }
 }
 ```
 
-Parts are always returned in ascending position order.
+Parts are ordered by position. An upload without parts has `parts: []` and
+`received_size: 0`. A completed, canceled, or nonexistent upload returns `404`.
 
-### Upload or replace a part
+### PUT /v1/uploads/:file_id/parts/:position
 
-```http
-PUT /v1/uploads/:file_id/parts/:position
-Content-Type: application/octet-stream
-Content-Length: 16777216
-```
+Request body is raw part bytes, conventionally sent as
+`Content-Type: application/octet-stream`. Position is a nonnegative, zero-based
+integer. Parts may be uploaded concurrently and out of order.
 
-Positions are zero-based. Parts may be sent concurrently and out of order. The
-server reads at most `BlobsMaxSize`, currently 16 MiB, from each request body.
-If the body contains more data, only the first `BlobsMaxSize` bytes are stored
-for that position; trailing bytes are not part of the uploaded blob. Clients
-must send additional data as separate parts at subsequent positions.
-
-- A new position returns `201 Created`.
-- Replacing an existing position returns `200 OK`.
-- An empty part returns `400 Bad Request`.
-- Uploading to a completed or canceled upload returns `404 Not Found`.
+At most `BlobsMaxSize` bytes are read from each request, by default 16 MiB.
+Additional bytes are not stored; send them as later parts. A new position
+returns `201 Created`; replacing an existing position normally returns `200 OK`:
 
 ```json
 {
@@ -441,67 +376,135 @@ must send additional data as separate parts at subsequent positions.
 }
 ```
 
-The replacement becomes visible atomically; readers never observe a partially
-replaced part.
+Empty parts and negative positions return `400`. Completed, canceled, or
+nonexistent uploads return `404`. Retrying a position replaces its contents
+without renumbering other parts. The status distinction uses a lookup before
+the write, so it is not a concurrency guarantee for simultaneous requests to
+the same position.
 
-### Remove a part
+### DELETE /v1/uploads/:file_id/parts/:position
 
-```http
-DELETE /v1/uploads/:file_id/parts/:position
+No body. Returns `204 No Content`. Negative positions return `400`. A missing
+part, or a completed, canceled, or nonexistent upload, returns `404`.
+Removing a part does not renumber later positions.
+
+### POST /v1/uploads/:file_id/complete
+
+No body. Completion requires contiguous positions starting at zero, exactly
+`BlobsMaxSize` bytes in every non-final part, at most `BlobsMaxSize` bytes in the
+final part, and a total size matching the declared size. An empty file may be
+completed with no parts when its declared size is zero.
+
+Returns `200 OK` with the shared `file` envelope in `ready` status. Failed
+validation returns `409` with a string error describing the mismatch; the
+upload remains editable. A nonexistent or canceled upload returns `404`.
+Repeating completion for an already completed file returns that file with
+`200 OK`.
+
+### DELETE /v1/uploads/:file_id
+
+No body. Returns `204 No Content`. Canceling removes unfinished metadata and
+blob associations; unreferenced physical blobs are eligible for cleanup.
+A completed, already canceled, or nonexistent upload returns `404`.
+
+## File permissions
+
+These endpoints require an activated account that owns the completed file.
+`:id` is the file UUID; `:user_id` identifies the user whose permissions are
+being changed. Ownership is checked using `files.owner_id`.
+
+Allowed codes are `files:read`, `files:write`, and `files:delete`. They are
+independent stored permissions; no implication between codes is implemented.
+These endpoints only manage records. Codes are not yet enforced on file or
+upload operations. The owner's access to permissions management is based on
+ownership, not these rows; changing rows does not change `owner_id`.
+
+Common failures:
+
+- `401`: missing or invalid authentication token.
+- `403`: inactive account or caller is not the file owner.
+- `400`: invalid UUID path parameter.
+- `404`: file does not exist or is still uploading.
+- `500`: unexpected database error.
+
+Authentication, file lookup, and ownership checks precede body validation and
+target-user validation, so an earlier error can take precedence.
+
+### GET /v1/files/:id/permissions
+
+Input: file UUID in the path, Bearer token in `Authorization`, no request body.
+
+Returns `200 OK` with one row per `(file_id, user_id, code)`, ordered by user ID
+and code:
+
+```json
+{
+    "permissions": [
+        {
+            "file_id": "32f11d17-b1f5-4fb0-94ca-614903665dff",
+            "user_id": "593fc45d-8640-4e4a-a488-aa753b27895c",
+            "code": "files:read"
+        },
+        {
+            "file_id": "32f11d17-b1f5-4fb0-94ca-614903665dff",
+            "user_id": "593fc45d-8640-4e4a-a488-aa753b27895c",
+            "code": "files:write"
+        }
+    ]
+}
 ```
 
-Returns `204 No Content`. Removing a nonexistent position returns `404 Not
-Found`. Removing a part does not renumber later positions.
+If no explicit permissions exist, the response is `{"permissions":[]}`.
+Implicit owner access is not added to this list. There is no pagination.
 
-### Complete an upload
+### PUT /v1/files/:id/permissions/:user_id
 
-```http
-POST /v1/uploads/:file_id/complete
+Input: file and target-user UUIDs in the path, Bearer token in `Authorization`,
+and JSON body:
+
+```json
+{
+    "codes": ["files:read", "files:write"]
+}
 ```
 
-Completion succeeds only when:
+Replaces all explicit permissions for this user and file in one transaction.
+Other users' rows are unaffected. The target user must exist. Repeating the
+same request leaves the same set of permissions.
 
-- the upload is still in `uploading` status;
-- part positions start at zero and are contiguous;
-- every non-final part is exactly `BlobsMaxSize`;
-- the final part is no larger than `BlobsMaxSize`;
-- the sum of part sizes equals the declared logical file size.
+Returns `204 No Content` with an empty body. To revoke all explicit permissions,
+send `{"codes":[]}`, which also returns `204`.
 
-An empty file may be completed without parts when its declared size is zero.
+Additional failures:
 
-Returns `200 OK` with the completed `file` envelope. Validation failures return
-`409 Conflict` with details about missing positions or a size mismatch. The
-upload remains editable after a failed completion attempt.
+- `400`: malformed JSON, wrong field type, unknown JSON field, or oversized body.
+- `422`: missing or null `codes`, an unknown code, or duplicate codes.
+- `404`: target user does not exist.
 
-Completion is idempotent: repeating it for the same successfully completed
-upload returns the completed file.
-
-### Cancel an upload
+For example, a repeated code produces:
 
 ```http
-DELETE /v1/uploads/:file_id
+HTTP/1.1 422 Unprocessable Entity
+Content-Type: application/json
 ```
 
-Returns `204 No Content`. Canceling removes unfinished file metadata and makes
-unreferenced uploaded blobs eligible for cleanup. It never changes an existing
-file during a canceled content replacement.
+```json
+{
+    "error": {
+        "codes": "must not contain duplicates"
+    }
+}
+```
 
-## Data integrity and concurrency guarantees
+### DELETE /v1/files/:id/permissions/:user_id
 
-- A logical file is separate from its physical blobs.
-- Blob positions define file order and are preserved during concurrent upload.
-- Part replacement and upload completion are transactional at the metadata
-  layer.
-- A file becomes readable only after successful completion.
-- Failed content replacement never changes the current readable blob list.
-- Deletion never removes a blob still referenced by another logical file.
-- Request cancellation stops ongoing uploads and downloads without leaking
-  goroutines.
+Input: file and target-user UUIDs in the path, Bearer token in `Authorization`,
+no request body.
 
-## Authentication
+Revokes all explicit permissions for this user on this file. Returns
+`204 No Content` with an empty body, including when the user has no permission
+rows or the target user does not exist. The file must still exist in `ready`
+status and belong to the caller, even for repeated deletes.
 
-The `v1` API does not implement authentication. It is intended for trusted
-local use. Callers provide `owner_id` explicitly, and the server validates
-resource ownership relationships. Authentication and authorization can be
-added at the transport boundary in a later API version without exposing blob
-storage internals.
+Deleting a file or user also removes their permission rows through database
+foreign keys with `ON DELETE CASCADE`.

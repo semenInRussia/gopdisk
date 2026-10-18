@@ -13,11 +13,12 @@ var (
 )
 
 type Storage struct {
-	bs     *blobs.BlobStorage
-	db     *sql.DB
-	Users  UserModel
-	Files  FileModel
-	Tokens TokenModel
+	bs          *blobs.BlobStorage
+	db          *sql.DB
+	Users       UserModel
+	Files       FileModel
+	Tokens      TokenModel
+	Permissions PermissionsModel
 }
 
 func MakeStorage(path string, db *sql.DB) (*Storage, error) {
@@ -31,11 +32,12 @@ func MakeStorage(path string, db *sql.DB) (*Storage, error) {
 	}
 
 	s := Storage{
-		bs:     bs,
-		db:     db,
-		Files:  FileModel{db: db, bs: bs},
-		Users:  UserModel{db: db},
-		Tokens: TokenModel{db: db},
+		bs:          bs,
+		db:          db,
+		Files:       FileModel{db: db, bs: bs},
+		Users:       UserModel{db: db},
+		Tokens:      TokenModel{db: db},
+		Permissions: PermissionsModel{db: db},
 	}
 
 	return &s, nil
