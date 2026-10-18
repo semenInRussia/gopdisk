@@ -27,25 +27,25 @@ func (app *Application) routes() http.Handler {
 	// Users
 	router.HandlerFunc(http.MethodPost, "/v1/users", app.usersPostHandler)
 	router.HandlerFunc(http.MethodPut, "/v1/users/activated", app.usersActivatedPutHandler)
-	router.HandlerFunc(http.MethodGet, "/v1/users/:id", app.usersGetHandler)
-	router.HandlerFunc(http.MethodDelete, "/v1/users/:id", app.usersDeleteHandler)
-	router.HandlerFunc(http.MethodGet, "/v1/users/:id/files", app.usersFilesGetHandler)
-	router.HandlerFunc(http.MethodGet, "/v1/users/:id/uploads", app.usersUploadsGetHandler)
+	router.HandlerFunc(http.MethodGet, "/v1/users/:id", app.requireActivatedUser(app.usersGetHandler))
+	router.HandlerFunc(http.MethodDelete, "/v1/users/:id", app.requireActivatedUser(app.usersDeleteHandler))
+	router.HandlerFunc(http.MethodGet, "/v1/users/:id/files", app.requireActivatedUser(app.usersFilesGetHandler))
+	router.HandlerFunc(http.MethodGet, "/v1/users/:id/uploads", app.requireActivatedUser(app.usersUploadsGetHandler))
 
 	// Files
-	router.HandlerFunc(http.MethodGet, "/v1/files/:id", app.filesGetHandler)
-	router.HandlerFunc(http.MethodDelete, "/v1/files/:id", app.filesDeleteHandler)
-	router.HandlerFunc(http.MethodPatch, "/v1/files/:id", app.filesPatchHandler)
-	router.HandlerFunc(http.MethodGet, "/v1/files/:id/content", app.filesContentGetHandler)
-	router.HandlerFunc(http.MethodHead, "/v1/files/:id/content", app.filesContentHeadHandler)
+	router.HandlerFunc(http.MethodGet, "/v1/files/:id", app.requireActivatedUser(app.filesGetHandler))
+	router.HandlerFunc(http.MethodDelete, "/v1/files/:id", app.requireActivatedUser(app.filesDeleteHandler))
+	router.HandlerFunc(http.MethodPatch, "/v1/files/:id", app.requireActivatedUser(app.filesPatchHandler))
+	router.HandlerFunc(http.MethodGet, "/v1/files/:id/content", app.requireActivatedUser(app.filesContentGetHandler))
+	router.HandlerFunc(http.MethodHead, "/v1/files/:id/content", app.requireActivatedUser(app.filesContentHeadHandler))
 
 	// Uploads
-	router.HandlerFunc(http.MethodPost, "/v1/files/upload", app.filesUploadsPostHandler)
-	router.HandlerFunc(http.MethodGet, "/v1/uploads/:file_id", app.uploadsGetHandler)
-	router.HandlerFunc(http.MethodPut, "/v1/uploads/:file_id/parts/:position", app.uploadsPartsPutHandler)
-	router.HandlerFunc(http.MethodDelete, "/v1/uploads/:file_id/parts/:position", app.uploadsPartsDeleteHandler)
-	router.HandlerFunc(http.MethodPost, "/v1/uploads/:file_id/complete", app.uploadsCompletePostHandler)
-	router.HandlerFunc(http.MethodDelete, "/v1/uploads/:file_id", app.uploadsDeleteHandler)
+	router.HandlerFunc(http.MethodPost, "/v1/files/upload", app.requireActivatedUser(app.filesUploadsPostHandler))
+	router.HandlerFunc(http.MethodGet, "/v1/uploads/:file_id", app.requireActivatedUser(app.uploadsGetHandler))
+	router.HandlerFunc(http.MethodPut, "/v1/uploads/:file_id/parts/:position", app.requireActivatedUser(app.uploadsPartsPutHandler))
+	router.HandlerFunc(http.MethodDelete, "/v1/uploads/:file_id/parts/:position", app.requireActivatedUser(app.uploadsPartsDeleteHandler))
+	router.HandlerFunc(http.MethodPost, "/v1/uploads/:file_id/complete", app.requireActivatedUser(app.uploadsCompletePostHandler))
+	router.HandlerFunc(http.MethodDelete, "/v1/uploads/:file_id", app.requireActivatedUser(app.uploadsDeleteHandler))
 
 	// Tokens
 	router.HandlerFunc(http.MethodPost, "/v1/tokens/authentication", app.tokensAuthenticationPostHandler)

@@ -50,6 +50,26 @@ func (app *Application) authenticate(next http.Handler) http.Handler {
 	})
 }
 
+func (app *Application) requireAuthenticatedUser(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if app.contextGetUser(r).IsAnonymous() {
+			app.authenticationRequiredResponse(w)
+			return
+		}
+		next.ServeHTTP(w, r)
+	}
+}
+
+func (app *Application) requireActivatedUser(next http.HandlerFunc) http.HandlerFunc {
+	return app.requireAuthenticatedUser(func(w http.ResponseWriter, r *http.Request) {
+		if !app.contextGetUser(r).Activated {
+			app.inactiveAccountResponse(w)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (app *Application) recoverPanic(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {

@@ -151,6 +151,15 @@ func (app *Application) invalidAuthenticationTokenResponse(w http.ResponseWriter
 	app.errorResponse(w, "invalid or missing authentication token", http.StatusUnauthorized)
 }
 
+func (app *Application) authenticationRequiredResponse(w http.ResponseWriter) {
+	w.Header().Set("WWW-Authenticate", "Bearer")
+	app.errorResponse(w, "you must be authenticated to access this resource", http.StatusUnauthorized)
+}
+
+func (app *Application) inactiveAccountResponse(w http.ResponseWriter) {
+	app.errorResponse(w, "your account must be activated to access this resource", http.StatusForbidden)
+}
+
 func (app *Application) writeValidatorErrors(w http.ResponseWriter, v *validator.Validator) {
 	status := http.StatusUnprocessableEntity
 	if v.IsValid() {
