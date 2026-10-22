@@ -24,6 +24,7 @@ func (app *Application) routes() http.Handler {
 	router.NotFound = http.HandlerFunc(app.notFoundResponse)
 
 	router.HandlerFunc(http.MethodGet, "/v1/healthcheck", app.healthCheckHandler)
+	router.HandlerFunc(http.MethodGet, "/v1/me", app.requireActivatedUser(app.usersMeGetHandler))
 
 	// Users
 	router.HandlerFunc(http.MethodPost, "/v1/users", app.usersPostHandler)

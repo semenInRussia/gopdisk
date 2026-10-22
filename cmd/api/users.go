@@ -94,6 +94,12 @@ func (app *Application) usersActivatedPutHandler(w http.ResponseWriter, r *http.
 	}
 }
 
+func (app *Application) usersMeGetHandler(w http.ResponseWriter, r *http.Request) {
+	if err := app.writeJSON(w, Envelope{"user": app.contextGetUser(r)}, http.StatusOK, nil); err != nil {
+		app.serverErrorResponse(w, err)
+	}
+}
+
 func (app *Application) usersGetHandler(w http.ResponseWriter, r *http.Request) {
 	id, err := app.getUUIDParam(r, "id")
 	if err != nil {

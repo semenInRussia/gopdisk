@@ -128,6 +128,7 @@ Collection responses use arrays, including `[]` when empty.
 | `POST` | `/v1/users` | `202`, registration message |
 | `PUT` | `/v1/users/activated` | `200`, `user` |
 | `POST` | `/v1/tokens/authentication` | `201`, `authentication_token` |
+| `GET` | `/v1/me` | `200`, authenticated `user` |
 | `GET` | `/v1/users/:id` | `200`, `user` |
 | `DELETE` | `/v1/users/:id` | `204` |
 | `GET` | `/v1/users/:id/files` | `200`, `files` |
@@ -234,6 +235,12 @@ Unknown email, incorrect password, or an inactive account returns `401` with
 set `WWW-Authenticate`.
 
 ## Users
+
+### GET /v1/me
+
+No body. Returns `200 OK` with the shared `user` envelope for the authenticated
+user. This avoids requiring clients to retain a user ID alongside the opaque
+authentication token.
 
 ### GET /v1/users/:id
 

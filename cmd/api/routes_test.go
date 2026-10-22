@@ -396,6 +396,43 @@ func TestUsersGetEndpoint(t *testing.T) {
 	})
 }
 
+func TestUsersMeGetEndpoint(t *testing.T) {
+	t.Run("returns authenticated user", func(t *testing.T) {
+		app, _ := newAuthenticatedTestApplication(t)
+
+		recorder := serveRequest(t, app, http.MethodGet, "/v1/me", nil)
+
+		assertJSONResponse(t, recorder, http.StatusOK)
+		response := decodeResponse[struct {
+			User data.User `json:"user"`
+		}](t, recorder)
+		if response.User.ID != data.UserID("baab6197-3e2d-4969-8492-247bbba900dc") || response.User.Name != "Alice" {
+			t.Errorf("got user %+v, expected authenticated Alice", response.User)
+		}
+	})
+
+	t.Run("requires authentication", func(t *testing.T) {
+		app, _ := newTestApplication(t)
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+
+		app.routes().ServeHTTP(recorder, request)
+
+		assertJSONResponse(t, recorder, http.StatusUnauthorized)
+	})
+
+	t.Run("rejects invalid token", func(t *testing.T) {
+		app, _ := newTestApplication(t)
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+		request.Header.Set("Authorization", "Bearer invalid")
+
+		app.routes().ServeHTTP(recorder, request)
+
+		assertJSONResponse(t, recorder, http.StatusUnauthorized)
+	})
+}
+
 func TestUsersDeleteEndpoint(t *testing.T) {
 	const userID = "baab6197-3e2d-4969-8492-247bbba900dc"
 	query := regexp.QuoteMeta("DELETE FROM users WHERE id = $1")
