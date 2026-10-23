@@ -47,6 +47,24 @@ go run ./cmd/migrate up
 go run ./cmd/api
 ```
 
+## Run Frontend
+
+The simple React frontend lives in `frontend/`. Install its dependencies and
+start the Vite development server:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173`. Create a production build with:
+
+```bash
+cd frontend
+npm run build
+```
+
 The API sends registration messages through SMTP. Configure it with
 `GOPHERDISK_SMTP_HOST`, `GOPHERDISK_SMTP_PORT`,
 `GOPHERDISK_SMTP_USERNAME`, `GOPHERDISK_SMTP_PASSWORD`, and

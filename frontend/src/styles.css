@@ -1,0 +1,147 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  align-items: center;
+  background: #101010;
+  color: #1d1d1f;
+  display: flex;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  font-size: 17px;
+  -webkit-font-smoothing: antialiased;
+  justify-content: center;
+  margin: 0;
+  min-height: 100vh;
+  padding: 32px;
+}
+
+.registration-form {
+  background: #fbfbfc;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 24px;
+  box-shadow:
+    0 34px 90px rgba(0, 0, 0, 0.42),
+    0 4px 18px rgba(0, 0, 0, 0.22);
+  padding: clamp(44px, 6vw, 72px);
+  width: min(960px, calc(100vw - 64px));
+}
+
+.form-grid {
+  display: grid;
+  gap: 22px 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.form-field {
+  min-width: 0;
+}
+
+.visually-hidden {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+input {
+  appearance: none;
+  background: #fff;
+  border: 2px solid #929296;
+  border-radius: 16px;
+  color: #1d1d1f;
+  font: inherit;
+  height: 76px;
+  min-width: 0;
+  padding: 0 28px;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+  width: 100%;
+}
+
+input::placeholder {
+  color: #6e6e73;
+  opacity: 1;
+}
+
+input:focus {
+  border-color: #2478e5;
+  box-shadow: 0 0 0 4px rgba(36, 120, 229, 0.18);
+  outline: none;
+}
+
+.form-divider {
+  background: #dedee3;
+  height: 1px;
+  margin: clamp(38px, 5vw, 56px) 0 38px;
+  width: 100%;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+button {
+  appearance: none;
+  background: #3478df;
+  border: 1px solid #3478df;
+  border-radius: 13px;
+  box-shadow: 0 2px 5px rgba(0, 91, 211, 0.2);
+  color: white;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 17px;
+  font-weight: 400;
+  min-height: 50px;
+  min-width: 224px;
+  padding: 12px 28px;
+  transition: background-color 120ms ease, transform 80ms ease;
+}
+
+button:hover {
+  background: #2c6fd4;
+}
+
+button:active {
+  background: #2567c8;
+  transform: scale(0.99);
+}
+
+button:focus-visible {
+  outline: 4px solid rgba(36, 120, 229, 0.22);
+  outline-offset: 3px;
+}
+
+@media (max-width: 700px) {
+  body {
+    padding: 16px;
+  }
+
+  .registration-form {
+    border-radius: 20px;
+    padding: 28px 20px 24px;
+    width: 100%;
+  }
+
+  .form-grid {
+    gap: 14px;
+    grid-template-columns: 1fr;
+  }
+
+  input {
+    border-radius: 14px;
+    height: 64px;
+    padding: 0 20px;
+  }
+
+  .form-divider {
+    margin: 30px 0 24px;
+  }
+
+  button {
+    min-width: 100%;
+  }
+}
