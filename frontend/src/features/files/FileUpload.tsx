@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { useAppDispatch, useAppSelector } from '../../app/hooks'
 import StatusMessage from '../auth/StatusMessage'
+import { serializeApiError } from '../../api/client'
+import { openFile } from './openFile'
 import {
   loadFiles,
   selectAllFiles,
@@ -26,12 +28,14 @@ function formatBytes(bytes: number): string {
 
 export default function FileUpload({ ownerId }: FileUploadProps) {
   const dispatch = useAppDispatch()
+  const token = useAppSelector((state) => state.auth.token)
   const files = useAppSelector(selectAllFiles)
   const listStatus = useAppSelector(selectFilesListStatus)
   const listError = useAppSelector(selectFilesListError)
   const upload = useAppSelector(selectUpload)
   const inputRef = useRef<HTMLInputElement>(null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [openError, setOpenError] = useState<string | null>(null)
 
   useEffect(() => {
     if (listStatus === 'idle') dispatch(loadFiles(ownerId))
@@ -50,6 +54,15 @@ export default function FileUpload({ ownerId }: FileUploadProps) {
     if (uploadFile.fulfilled.match(result)) {
       setSelectedFile(null)
       if (inputRef.current) inputRef.current.value = ''
+    }
+  }
+
+  async function handleOpenFile(id: string) {
+    setOpenError(null)
+    try {
+      await openFile(id, token)
+    } catch (error) {
+      setOpenError(serializeApiError(error).message)
     }
   }
 
@@ -97,6 +110,7 @@ export default function FileUpload({ ownerId }: FileUploadProps) {
       />
 
       {listError && <StatusMessage error={listError} />}
+      {openError && <StatusMessage error={{ message: openError }} />}
       {listStatus === 'loading' && <p className="files-placeholder">Загружаем список файлов…</p>}
       {listStatus === 'succeeded' && files.length === 0 && (
         <p className="files-placeholder">Здесь пока нет файлов.</p>
@@ -105,12 +119,19 @@ export default function FileUpload({ ownerId }: FileUploadProps) {
         <ul className="files-list">
           {files.map((file) => (
             <li key={file.id}>
-              <span className="file-icon" aria-hidden="true">↥</span>
-              <span className="file-details">
-                <strong>{file.name}</strong>
-                <small>{file.type} · {formatBytes(file.size)}</small>
-              </span>
-              <span className="file-status">Готов</span>
+              <button
+                className="file-open"
+                type="button"
+                onClick={() => handleOpenFile(file.id)}
+                aria-label={`Открыть ${file.name} в новой вкладке`}
+              >
+                <span className="file-icon" aria-hidden="true">↗</span>
+                <span className="file-details">
+                  <strong>{file.name}</strong>
+                  <small>{file.type} · {formatBytes(file.size)}</small>
+                </span>
+                <span className="file-status">Готов</span>
+              </button>
             </li>
           ))}
         </ul>

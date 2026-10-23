@@ -380,12 +380,33 @@ button:focus-visible {
 }
 
 .files-list li {
-  align-items: center;
   border-top: 1px solid #dedee3;
+}
+
+.file-open {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  box-shadow: none;
+  color: inherit;
   display: grid;
   gap: 14px;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  padding: 16px 0;
+  min-width: 0;
+  padding: 16px 8px;
+  text-align: left;
+  width: 100%;
+}
+
+.file-open:hover {
+  background: #edf4fd;
+}
+
+.file-open:focus-visible,
+.file-picker:focus-within {
+  outline: 3px solid #3478df;
+  outline-offset: 3px;
 }
 
 .file-icon {

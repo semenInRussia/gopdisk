@@ -16,22 +16,19 @@ class ApiRequestError extends Error {
   }
 }
 
-export async function apiRequest<T>(
+async function apiResponse(
   path: string,
   options: RequestInit = {},
   token?: string | null,
-): Promise<T> {
+): Promise<Response> {
   const headers = new Headers(options.headers)
   if (options.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
   if (token) headers.set('Authorization', `Bearer ${token}`)
 
   const response = await fetch(path, { ...options, headers })
-  if (response.status === 204) return undefined as T
-
-  const isJSON = response.headers.get('content-type')?.includes('application/json')
-  const body = isJSON ? await response.json() as unknown : null
-
   if (!response.ok) {
+    const isJSON = response.headers.get('content-type')?.includes('application/json')
+    const body = isJSON ? await response.json() as unknown : null
     const error = (body as { error?: string | Record<string, string> } | null)?.error
     if (error && typeof error === 'object') {
       throw new ApiRequestError('Проверьте заполненные поля.', response.status, error)
@@ -42,7 +39,27 @@ export async function apiRequest<T>(
     )
   }
 
-  return body as T
+  return response
+}
+
+export async function apiRequest<T>(
+  path: string,
+  options: RequestInit = {},
+  token?: string | null,
+): Promise<T> {
+  const response = await apiResponse(path, options, token)
+  if (response.status === 204) return undefined as T
+  const isJSON = response.headers.get('content-type')?.includes('application/json')
+  return (isJSON ? await response.json() : null) as T
+}
+
+export async function apiBlobRequest(
+  path: string,
+  options: RequestInit = {},
+  token?: string | null,
+): Promise<Blob> {
+  const response = await apiResponse(path, options, token)
+  return response.blob()
 }
 
 export function serializeApiError(error: unknown): ApiError {
