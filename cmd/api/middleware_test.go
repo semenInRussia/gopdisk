@@ -13,6 +13,143 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
+func TestEnableCORS(t *testing.T) {
+	app := &Application{}
+	app.cfg.cors.trustedOrigins = []string{"https://app.example.com", "http://localhost:5173"}
+
+	tests := []struct {
+		name          string
+		origin        string
+		allowedOrigin string
+	}{
+		{name: "no origin"},
+		{name: "trusted origin", origin: "https://app.example.com", allowedOrigin: "https://app.example.com"},
+		{name: "second trusted origin", origin: "http://localhost:5173", allowedOrigin: "http://localhost:5173"},
+		{name: "untrusted origin", origin: "https://evil.example.com"},
+		{name: "different scheme", origin: "http://app.example.com"},
+		{name: "different port", origin: "https://app.example.com:8443"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			called := false
+			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called = true
+				w.WriteHeader(http.StatusNoContent)
+			})
+			request := httptest.NewRequest(http.MethodGet, "/", nil)
+			if tt.origin != "" {
+				request.Header.Set("Origin", tt.origin)
+			}
+			recorder := httptest.NewRecorder()
+
+			app.enableCORS(next).ServeHTTP(recorder, request)
+
+			if !called {
+				t.Error("next handler was not called")
+			}
+			if recorder.Code != http.StatusNoContent {
+				t.Errorf("got status %d, want %d", recorder.Code, http.StatusNoContent)
+			}
+			if got := recorder.Header().Get("Access-Control-Allow-Origin"); got != tt.allowedOrigin {
+				t.Errorf("got Access-Control-Allow-Origin %q, want %q", got, tt.allowedOrigin)
+			}
+			assertHeaderValues(t, recorder, "Vary", []string{"Origin", "Access-Control-Request-Method"})
+		})
+	}
+}
+
+func TestEnableCORSPreflight(t *testing.T) {
+	app := &Application{}
+	app.cfg.cors.trustedOrigins = []string{"https://app.example.com"}
+
+	for _, tt := range []struct {
+		name       string
+		origin     string
+		preflight  bool
+		wantStatus int
+		wantCalled bool
+	}{
+		{name: "trusted preflight", origin: "https://app.example.com", preflight: true, wantStatus: http.StatusOK},
+		{name: "trusted OPTIONS without requested method", origin: "https://app.example.com", wantStatus: http.StatusNoContent, wantCalled: true},
+		{name: "untrusted preflight", origin: "https://evil.example.com", preflight: true, wantStatus: http.StatusNoContent, wantCalled: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			called := false
+			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called = true
+				w.WriteHeader(http.StatusNoContent)
+			})
+			request := httptest.NewRequest(http.MethodOptions, "/v1/files/file-id", nil)
+			request.Header.Set("Origin", tt.origin)
+			if tt.preflight {
+				request.Header.Set("Access-Control-Request-Method", http.MethodPut)
+			}
+			recorder := httptest.NewRecorder()
+
+			app.enableCORS(next).ServeHTTP(recorder, request)
+
+			if recorder.Code != tt.wantStatus {
+				t.Errorf("got status %d, want %d", recorder.Code, tt.wantStatus)
+			}
+			if called != tt.wantCalled {
+				t.Errorf("next handler called = %v, want %v", called, tt.wantCalled)
+			}
+
+			if tt.origin == "https://app.example.com" {
+				if got := recorder.Header().Get("Access-Control-Allow-Origin"); got != tt.origin {
+					t.Errorf("got Access-Control-Allow-Origin %q, want %q", got, tt.origin)
+				}
+			} else if got := recorder.Header().Get("Access-Control-Allow-Origin"); got != "" {
+				t.Errorf("got unexpected Access-Control-Allow-Origin %q", got)
+			}
+
+			if tt.preflight && tt.origin == "https://app.example.com" {
+				if got := recorder.Header().Get("Access-Control-Allow-Methods"); got != "OPTIONS, PUT, PATCH, DELETE" {
+					t.Errorf("got Access-Control-Allow-Methods %q", got)
+				}
+				if got := recorder.Header().Get("Access-Control-Allow-Headers"); got != "Authorization, Content-Type" {
+					t.Errorf("got Access-Control-Allow-Headers %q", got)
+				}
+			} else {
+				if got := recorder.Header().Get("Access-Control-Allow-Methods"); got != "" {
+					t.Errorf("got unexpected Access-Control-Allow-Methods %q", got)
+				}
+				if got := recorder.Header().Get("Access-Control-Allow-Headers"); got != "" {
+					t.Errorf("got unexpected Access-Control-Allow-Headers %q", got)
+				}
+			}
+		})
+	}
+}
+
+func TestRoutesCORSHeadersIncludeAuthorizationVary(t *testing.T) {
+	app, _ := newTestApplication(t)
+	app.cfg.cors.trustedOrigins = []string{"https://app.example.com"}
+	request := httptest.NewRequest(http.MethodGet, "/v1/healthcheck", nil)
+	request.Header.Set("Origin", "https://app.example.com")
+	recorder := httptest.NewRecorder()
+
+	app.routes().ServeHTTP(recorder, request)
+
+	assertHeaderValues(t, recorder, "Vary", []string{"Origin", "Access-Control-Request-Method", "Authorization"})
+}
+
+func assertHeaderValues(t *testing.T, recorder *httptest.ResponseRecorder, name string, want []string) {
+	t.Helper()
+
+	got := recorder.Header().Values(name)
+	if len(got) != len(want) {
+		t.Fatalf("got %s values %q, want %q", name, got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("got %s values %q, want %q", name, got, want)
+			return
+		}
+	}
+}
+
 const testAuthenticationToken = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 const filePermissionQuery = `SELECT f.owner_id = $2 OR EXISTS (

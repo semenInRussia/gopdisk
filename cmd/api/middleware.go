@@ -7,10 +7,32 @@ import (
 	"gopherdisk/internal/data"
 	"gopherdisk/internal/validator"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
 )
+
+func (app *Application) enableCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Vary", "Origin")
+		w.Header().Add("Vary", "Access-Control-Request-Method")
+
+		origin := r.Header.Get("Origin")
+		if origin != "" && slices.Contains(app.cfg.cors.trustedOrigins, origin) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+
+			if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
+				w.Header().Set("Access-Control-Allow-Methods", "OPTIONS, PUT, PATCH, DELETE")
+				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
 
 func (app *Application) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

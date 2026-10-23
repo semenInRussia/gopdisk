@@ -47,6 +47,13 @@ go run ./cmd/migrate up
 go run ./cmd/api
 ```
 
+To allow browser clients from specific origins, pass a space-separated CORS
+allowlist. Origins are matched exactly, including their scheme and port:
+
+```bash
+go run ./cmd/api -cors-trusted-origins='https://app.example.com http://localhost:5173'
+```
+
 The API sends registration messages through SMTP. Configure it with
 `GOPHERDISK_SMTP_HOST`, `GOPHERDISK_SMTP_PORT`,
 `GOPHERDISK_SMTP_USERNAME`, `GOPHERDISK_SMTP_PASSWORD`, and

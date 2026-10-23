@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -42,6 +43,9 @@ type Config struct {
 		username string
 		password string
 		sender   string
+	}
+	cors struct {
+		trustedOrigins []string
 	}
 }
 
@@ -132,6 +136,10 @@ func main() {
 	flag.StringVar(&cfg.smtp.username, "smtp-username", envOrDefault(envSMTPUsername, ""), "SMTP username")
 	flag.StringVar(&cfg.smtp.password, "smtp-password", envOrDefault(envSMTPPassword, ""), "SMTP password")
 	flag.StringVar(&cfg.smtp.sender, "smtp-sender", envOrDefault(envSMTPSender, "GopherDisk <no-reply@gopherdisk.online>"), "SMTP sender")
+	flag.Func("cors-trusted-origins", "trusted CORS origins (space separated)", func(value string) error {
+		cfg.cors.trustedOrigins = strings.Fields(value)
+		return nil
+	})
 
 	flag.Parse()
 
