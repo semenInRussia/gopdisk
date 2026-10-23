@@ -1,0 +1,496 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  align-items: center;
+  background: #101010;
+  color: #1d1d1f;
+  display: flex;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  font-size: 17px;
+  -webkit-font-smoothing: antialiased;
+  justify-content: center;
+  margin: 0;
+  min-height: 100vh;
+  padding: 32px;
+}
+
+#root {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.auth-card {
+  background: #fbfbfc;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 24px;
+  box-shadow:
+    0 34px 90px rgba(0, 0, 0, 0.42),
+    0 4px 18px rgba(0, 0, 0, 0.22);
+  padding: clamp(44px, 6vw, 72px);
+  width: min(960px, calc(100vw - 64px));
+}
+
+.auth-card--compact {
+  width: min(680px, calc(100vw - 64px));
+}
+
+.auth-header {
+  margin-bottom: 36px;
+  text-align: center;
+}
+
+.auth-header h1,
+.profile-header h1 {
+  font-size: clamp(30px, 4vw, 44px);
+  letter-spacing: -0.025em;
+  margin: 0;
+}
+
+.form-grid {
+  display: grid;
+  gap: 22px 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.form-grid--single {
+  grid-template-columns: 1fr;
+}
+
+.form-field {
+  min-width: 0;
+}
+
+.visually-hidden {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+input {
+  appearance: none;
+  background: #fff;
+  border: 2px solid #929296;
+  border-radius: 16px;
+  color: #1d1d1f;
+  font: inherit;
+  height: 76px;
+  min-width: 0;
+  padding: 0 28px;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+  width: 100%;
+}
+
+input::placeholder {
+  color: #6e6e73;
+  opacity: 1;
+}
+
+input:focus {
+  border-color: #2478e5;
+  box-shadow: 0 0 0 4px rgba(36, 120, 229, 0.18);
+  outline: none;
+}
+
+.form-divider {
+  background: #dedee3;
+  height: 1px;
+  margin: clamp(38px, 5vw, 56px) 0 38px;
+  width: 100%;
+}
+
+.form-actions {
+  align-items: center;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.form-actions--split {
+  justify-content: space-between;
+}
+
+button {
+  appearance: none;
+  background: #3478df;
+  border: 1px solid #3478df;
+  border-radius: 13px;
+  box-shadow: 0 2px 5px rgba(0, 91, 211, 0.2);
+  color: white;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 17px;
+  font-weight: 400;
+  min-height: 50px;
+  min-width: 224px;
+  padding: 12px 28px;
+  transition: background-color 120ms ease, transform 80ms ease;
+}
+
+button:hover {
+  background: #2c6fd4;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+button:active {
+  background: #2567c8;
+  transform: scale(0.99);
+}
+
+button:focus-visible {
+  outline: 4px solid rgba(36, 120, 229, 0.22);
+  outline-offset: 3px;
+}
+
+.text-link {
+  color: #1769ce;
+  font-size: 16px;
+  text-decoration: none;
+}
+
+.text-link:hover {
+  text-decoration: underline;
+}
+
+.status-message {
+  border-radius: 12px;
+  font-size: 15px;
+  margin: 0 0 24px;
+  padding: 14px 16px;
+}
+
+.status-message p {
+  margin: 0;
+}
+
+.status-message ul {
+  margin: 8px 0 0;
+  padding-left: 22px;
+}
+
+.status-message--error {
+  background: #fff0ef;
+  border: 1px solid #ffc7c2;
+  color: #a51e16;
+}
+
+.status-message--success {
+  background: #edf8ee;
+  border: 1px solid #b9dfbe;
+  color: #236a2c;
+}
+
+.success-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 28px;
+}
+
+.primary-link {
+  background: #3478df;
+  border-radius: 13px;
+  color: #fff;
+  padding: 14px 24px;
+  text-decoration: none;
+}
+
+.profile-card {
+  width: min(960px, calc(100vw - 64px));
+}
+
+.profile-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 24px;
+  justify-content: space-between;
+}
+
+.eyebrow {
+  color: #6e6e73;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}
+
+.account-status {
+  background: #f0f0f2;
+  border-radius: 999px;
+  color: #6e6e73;
+  font-size: 14px;
+  padding: 8px 13px;
+  white-space: nowrap;
+}
+
+.account-status--active {
+  background: #e4f5e7;
+  color: #267432;
+}
+
+.profile-list {
+  margin: 42px 0 0;
+}
+
+.profile-list > div {
+  border-bottom: 1px solid #dedee3;
+  display: grid;
+  gap: 24px;
+  grid-template-columns: 180px minmax(0, 1fr);
+  padding: 18px 0;
+}
+
+.profile-list dt {
+  color: #6e6e73;
+}
+
+.profile-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.secondary-button {
+  background: #fff;
+  border-color: #3478df;
+  box-shadow: none;
+  color: #1769ce;
+}
+
+.secondary-button:hover {
+  background: #f1f6fd;
+}
+
+.files-section h2 {
+  font-size: 30px;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.section-heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.files-count {
+  align-items: center;
+  background: #eeeef1;
+  border-radius: 999px;
+  color: #55555a;
+  display: inline-flex;
+  font-size: 14px;
+  height: 34px;
+  justify-content: center;
+  min-width: 34px;
+  padding: 0 10px;
+}
+
+.upload-form {
+  align-items: stretch;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.file-picker {
+  background: #fff;
+  border: 2px dashed #b8b8be;
+  border-radius: 16px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 76px;
+  min-width: 0;
+  padding: 14px 20px;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.file-picker:hover {
+  background: #f7faff;
+  border-color: #3478df;
+}
+
+.file-picker span,
+.file-details strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-picker small,
+.file-details small {
+  color: #6e6e73;
+  font-size: 13px;
+  margin-top: 5px;
+}
+
+.file-picker input {
+  height: 1px;
+  opacity: 0;
+  padding: 0;
+  position: absolute;
+  width: 1px;
+}
+
+.upload-progress {
+  margin-top: 18px;
+}
+
+.upload-progress__track {
+  background: #e5e5e8;
+  border-radius: 999px;
+  height: 8px;
+  overflow: hidden;
+}
+
+.upload-progress__track span {
+  background: #3478df;
+  display: block;
+  height: 100%;
+  transition: width 180ms ease;
+}
+
+.upload-progress p {
+  color: #6e6e73;
+  font-size: 13px;
+  margin: 8px 0 0;
+}
+
+.files-placeholder {
+  color: #6e6e73;
+  margin: 28px 0 4px;
+  text-align: center;
+}
+
+.files-list {
+  list-style: none;
+  margin: 28px 0 0;
+  padding: 0;
+}
+
+.files-list li {
+  border-top: 1px solid #dedee3;
+}
+
+.file-open {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  box-shadow: none;
+  color: inherit;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  min-width: 0;
+  padding: 16px 8px;
+  text-align: left;
+  width: 100%;
+}
+
+.file-open:hover {
+  background: #edf4fd;
+}
+
+.file-open:focus-visible,
+.file-picker:focus-within {
+  outline: 3px solid #3478df;
+  outline-offset: 3px;
+}
+
+.file-icon {
+  align-items: center;
+  background: #edf4fd;
+  border-radius: 11px;
+  color: #1769ce;
+  display: inline-flex;
+  font-size: 21px;
+  height: 42px;
+  justify-content: center;
+  width: 42px;
+}
+
+.file-details {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.file-status {
+  color: #267432;
+  font-size: 13px;
+}
+
+.loading-card {
+  color: #6e6e73;
+  text-align: center;
+}
+
+@media (max-width: 700px) {
+  body {
+    padding: 16px;
+  }
+
+  .auth-card,
+  .auth-card--compact,
+  .profile-card {
+    border-radius: 20px;
+    padding: 28px 20px 24px;
+    width: 100%;
+  }
+
+  .form-grid {
+    gap: 14px;
+    grid-template-columns: 1fr;
+  }
+
+  .upload-form {
+    grid-template-columns: 1fr;
+  }
+
+  input {
+    border-radius: 14px;
+    height: 64px;
+    padding: 0 20px;
+  }
+
+  .form-divider {
+    margin: 30px 0 24px;
+  }
+
+  button {
+    min-width: 100%;
+  }
+
+  .auth-header {
+    margin-bottom: 26px;
+  }
+
+  .form-actions--split {
+    align-items: stretch;
+    flex-direction: column-reverse;
+    gap: 18px;
+    text-align: center;
+  }
+
+  .profile-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .profile-list > div {
+    gap: 6px;
+    grid-template-columns: 1fr;
+  }
+}
