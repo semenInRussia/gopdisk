@@ -89,6 +89,24 @@ func (app *Application) serve() error {
 		WriteTimeout: 30 * time.Second,
 	}
 
+	gcCtx, cancelGC := context.WithCancel(context.Background())
+	defer cancelGC()
+
+	app.background(func() {
+		for {
+			_, err := app.storage.CollectGarbageBlobs(gcCtx)
+			if err != nil && gcCtx.Err() == nil {
+				app.logger.Printf("cannot collect garbage blobs: %v", err)
+			}
+
+			select {
+			case <-gcCtx.Done():
+				return
+			case <-time.After(10 * time.Second):
+			}
+		}
+	})
+
 	shutdownError := make(chan error)
 
 	go func() {
