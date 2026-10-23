@@ -1,5 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { useAppDispatch, useAppSelector } from '../../app/hooks'
+import FileUpload from '../files/FileUpload'
+import { filesCleared } from '../files/filesSlice'
 import { currentUserSet, selectCurrentUser } from '../users/usersSlice'
 import { signedOut } from './authSlice'
 
@@ -11,6 +13,7 @@ export default function Profile() {
   function handleSignOut() {
     dispatch(signedOut())
     dispatch(currentUserSet(null))
+    dispatch(filesCleared())
     navigate('/login', { replace: true })
   }
 
@@ -33,6 +36,9 @@ export default function Profile() {
         <div><dt>Имя</dt><dd>{user.name}</dd></div>
         <div><dt>Электронная почта</dt><dd>{user.email}</dd></div>
       </dl>
+
+      <div className="form-divider" aria-hidden="true" />
+      <FileUpload ownerId={user.id} />
 
       <div className="form-divider" aria-hidden="true" />
       <div className="form-actions">

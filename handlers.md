@@ -351,9 +351,18 @@ fields return `422`. The owner ID must equal the authenticated user's ID;
 otherwise the response is `403`. A nonexistent authenticated owner currently
 produces `500`.
 
-Returns `200 OK` with a `file` envelope, not `201` or an `upload` envelope.
-The shared file shape is used with `status: "uploading"`. No `Location` header
-is set. Completed-file reads will not expose the file until completion.
+Returns `200 OK` with a `file` and the server's current `part_size`, not `201`
+or an `upload` envelope. Clients must split the file using this part size:
+
+```json
+{
+    "file": {"id": "32f11d17-b1f5-4fb0-94ca-614903665dff", "status": "uploading"},
+    "part_size": 16777216
+}
+```
+
+The complete `file` value uses the shared file shape. No `Location` header is
+set. Completed-file reads will not expose the file until completion.
 
 There is no HTTP endpoint for replacing an existing file's contents:
 `POST /v1/files/:id/upload` is not registered.

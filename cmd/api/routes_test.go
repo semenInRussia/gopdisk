@@ -906,13 +906,17 @@ func TestFilesUploadPostEndpoint(t *testing.T) {
 
 		assertJSONResponse(t, recorder, http.StatusOK)
 		response := decodeResponse[struct {
-			File data.File `json:"file"`
+			File     data.File `json:"file"`
+			PartSize int64     `json:"part_size"`
 		}](t, recorder)
 		if response.File.ID != data.FileID(fileID) {
 			t.Errorf("got file ID %q, expected %q", response.File.ID, fileID)
 		}
 		if response.File.Status != data.FileStatusUploading {
 			t.Errorf("got file status %q, expected %q", response.File.Status, data.FileStatusUploading)
+		}
+		if response.PartSize != blobs.BlobsMaxSize {
+			t.Errorf("got part size %d, expected %d", response.PartSize, blobs.BlobsMaxSize)
 		}
 	})
 

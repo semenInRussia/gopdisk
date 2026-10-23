@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"gopherdisk/internal/blobs"
 	"gopherdisk/internal/data"
 	"gopherdisk/internal/validator"
 	"io"
@@ -171,7 +172,10 @@ func (app *Application) filesUploadsPostHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	data := Envelope{"file": file}
+	data := Envelope{
+		"file":      file,
+		"part_size": blobs.BlobsMaxSize,
+	}
 
 	if err := app.writeJSON(w, data, http.StatusOK, nil); err != nil {
 		app.serverErrorResponse(w, err)
