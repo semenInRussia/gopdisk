@@ -378,6 +378,29 @@ These will be introduced in later stages.
 
 ---
 
+## Frontend structure
+
+When frontend work is explicitly requested, use React, TypeScript, and Redux
+with the following source layout:
+
+```text
+src/
+├── main.tsx              # application entry point
+├── App.tsx               # top-level React component
+├── app/
+│   ├── store.ts          # creates the Redux store instance
+│   └── hooks.ts          # exports pre-typed React-Redux hooks
+└── features/
+    └── counter/
+        ├── Counter.tsx   # counter feature UI
+        └── counterSlice.ts # counter feature Redux logic
+```
+
+Organize Redux code by feature under `src/features`. Follow the same
+component-and-slice pattern for new domain features.
+
+---
+
 ## Future architecture
 
 The eventual project may look approximately like:
