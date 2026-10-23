@@ -15,6 +15,8 @@ require.extensions['.ts'] = (module, filename) => {
 const { apiBlobRequest, serializeApiError } = require('../src/api/client.ts')
 const { openFile } = require('../src/features/files/openFile.ts')
 const { default: filesReducer, uploadFile, loadFiles } = require('../src/features/files/filesSlice.ts')
+const { createUploadQueue } = require('../src/features/files/uploadQueue.ts')
+const { listenForPageFileDrops } = require('../src/features/files/pageFileDrop.ts')
 const storedFile = { id: 'file-id', name: 'sample.txt', type: 'text/plain', owner_id: 'owner', status: 'ready', size: 10 }
 const json = (body, status = 200) => Response.json(body, { status })
 const makeStore = () => configureStore({
@@ -28,6 +30,157 @@ const mockWindow = (t, value) => {
     else globalThis.window = previous
   })
 }
+
+function dragEvent(type, files = [], types = ['Files']) {
+  return Object.assign(new Event(type, { cancelable: true }), {
+    dataTransfer: { files, types, dropEffect: 'none' },
+  })
+}
+
+test('accepts multiple files dropped on the page and prevents browser navigation', () => {
+  const page = new EventTarget()
+  const received = []
+  const dragging = []
+  const stop = listenForPageFileDrops(page, (files) => received.push(files), (value) => dragging.push(value))
+  const files = [new File(['one'], 'one.txt'), new File(['two'], 'two.txt')]
+  const enter = dragEvent('dragenter')
+  page.dispatchEvent(enter)
+  assert.ok(enter.defaultPrevented)
+  const over = dragEvent('dragover')
+  page.dispatchEvent(over)
+  assert.ok(over.defaultPrevented)
+  assert.equal(over.dataTransfer.dropEffect, 'copy')
+  const drop = dragEvent('drop', files)
+  page.dispatchEvent(drop)
+  assert.ok(drop.defaultPrevented)
+  assert.deepEqual(received, [files])
+  assert.deepEqual(dragging, [true, false])
+  stop()
+})
+
+test('keeps the drop hint visible across nested elements and clears it on exit or cancellation', () => {
+  const page = new EventTarget()
+  let dragging = false
+  const stop = listenForPageFileDrops(page, () => assert.fail('Unexpected upload'), (value) => { dragging = value })
+  page.dispatchEvent(dragEvent('dragenter'))
+  page.dispatchEvent(dragEvent('dragenter'))
+  page.dispatchEvent(dragEvent('dragleave'))
+  assert.ok(dragging)
+  page.dispatchEvent(dragEvent('dragleave'))
+  assert.equal(dragging, false)
+  for (const type of ['dragend', 'blur']) {
+    page.dispatchEvent(dragEvent('dragenter'))
+    page.dispatchEvent(new Event(type))
+    assert.equal(dragging, false)
+  }
+  stop()
+})
+
+test('ignores text drags and removes page listeners on cleanup', () => {
+  const page = new EventTarget()
+  const received = []
+  const stop = listenForPageFileDrops(page, (files) => received.push(files), () => {})
+  for (const type of ['dragenter', 'dragover', 'drop']) {
+    const event = dragEvent(type, [], ['text/plain'])
+    page.dispatchEvent(event)
+    assert.equal(event.defaultPrevented, false)
+  }
+  page.dispatchEvent(dragEvent('drop'))
+  stop()
+  const event = dragEvent('drop', [new File([], 'after-unmount')])
+  page.dispatchEvent(event)
+  assert.equal(event.defaultPrevented, false)
+  assert.deepEqual(received, [])
+})
+
+test('uploads a large selection without limiting the number of files or overlapping uploads', async () => {
+  const files = Array.from({ length: 250 }, (_, index) => new File([String(index)], 'same-name.txt'))
+  const uploaded = []
+  const finished = Promise.withResolvers()
+  let active = 0
+  const queue = createUploadQueue(async (file) => {
+    active += 1
+    assert.equal(active, 1)
+    await Promise.resolve()
+    uploaded.push(file)
+    active -= 1
+  }, (state) => {
+    if (state.pending === 0) finished.resolve(state)
+  })
+  queue.add(files)
+  const state = await finished.promise
+  assert.deepEqual(uploaded, files)
+  assert.deepEqual(state, { total: 250, completed: 250, failed: 0, pending: 0, errors: [] })
+})
+
+test('appends new selections while an upload is in progress', async () => {
+  const first = Promise.withResolvers()
+  const finished = Promise.withResolvers()
+  const uploaded = []
+  const queue = createUploadQueue(async (file) => {
+    uploaded.push(file.name)
+    if (file.name === 'first') await first.promise
+  }, (state) => {
+    if (state.pending === 0) finished.resolve(state)
+  })
+  queue.add([new File([], 'first'), new File([], 'second')])
+  queue.add([new File([], 'third')])
+  assert.deepEqual(uploaded, ['first'])
+  first.resolve()
+  const state = await finished.promise
+  assert.deepEqual(uploaded, ['first', 'second', 'third'])
+  assert.equal(state.completed, 3)
+  assert.equal(state.total, 3)
+})
+
+test('reports failed filenames and continues uploading the remaining files', async () => {
+  const finished = Promise.withResolvers()
+  const uploaded = []
+  const queue = createUploadQueue(async (file) => {
+    if (file.name === 'bad') throw new Error('Disk full')
+    uploaded.push(file.name)
+  }, (state) => {
+    if (state.pending === 0) finished.resolve(state)
+  })
+  queue.add([new File([], 'before'), new File([], 'bad'), new File([], 'after')])
+  const state = await finished.promise
+  assert.deepEqual(uploaded, ['before', 'after'])
+  assert.equal(state.completed, 2)
+  assert.equal(state.failed, 1)
+  assert.deepEqual(state.errors, [{ filename: 'bad', message: 'Disk full' }])
+})
+
+test('ignores empty selections and starts fresh after a completed queue', async () => {
+  const snapshots = []
+  const queue = createUploadQueue(async () => {}, (state) => snapshots.push(state))
+  queue.add([])
+  assert.equal(snapshots.length, 0)
+  queue.add([new File([], 'first')])
+  await new Promise(setImmediate)
+  queue.add([new File([], 'second')])
+  await new Promise(setImmediate)
+  assert.deepEqual(snapshots.at(-1), { total: 1, completed: 1, failed: 0, pending: 0, errors: [] })
+})
+
+test('aborts the active upload and discards waiting files when stopped', async () => {
+  const active = Promise.withResolvers()
+  const snapshots = []
+  const uploaded = []
+  let signal
+  const queue = createUploadQueue(async (file, uploadSignal) => {
+    uploaded.push(file.name)
+    signal = uploadSignal
+    await active.promise
+  }, (state) => snapshots.push(state))
+  queue.add([new File([], 'first'), new File([], 'second')])
+  queue.stop()
+  assert.ok(signal.aborted)
+  active.resolve()
+  await new Promise(setImmediate)
+  queue.add([new File([], 'third')])
+  assert.deepEqual(uploaded, ['first'])
+  assert.equal(snapshots.length, 1)
+})
 
 test('uploads chunks at their original positions, then adds the ready file to the list', async (t) => {
   const parts = new Map()
