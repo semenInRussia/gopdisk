@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"regexp"
 	"testing"
@@ -180,6 +181,7 @@ func TestUsersPostEndpoint(t *testing.T) {
 	t.Run("creates user", func(t *testing.T) {
 		app, mock := newTestApplication(t)
 		sent := make(chan sentEmail, 1)
+		app.cfg.frontendURL = "https://disk.example.com/"
 		app.mailer = channelMailer{sent: sent}
 		expectRegistrationSuccess(mock)
 
@@ -200,9 +202,13 @@ func TestUsersPostEndpoint(t *testing.T) {
 		if email.templateFile != "user_welcome.tmpl" {
 			t.Errorf("got template %q, expected user_welcome.tmpl", email.templateFile)
 		}
-		token, ok := email.data["activationToken"].(string)
-		if !ok || len(token) != data.TokenLength {
-			t.Errorf("got invalid activation token %q", token)
+		link, ok := email.data["activationURL"].(string)
+		u, err := url.Parse(link)
+		if !ok || err != nil {
+			t.Fatalf("invalid activation URL %q: %v", link, err)
+		}
+		if u.Scheme != "https" || u.Host != "disk.example.com" || u.Path != "/activation" || len(u.Query().Get("token")) != data.TokenLength {
+			t.Errorf("unexpected activation URL %q", link)
 		}
 	})
 

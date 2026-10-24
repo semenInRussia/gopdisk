@@ -5,6 +5,7 @@ import (
 	"gopherdisk/internal/data"
 	"gopherdisk/internal/validator"
 	"net/http"
+	"net/url"
 )
 
 func (app *Application) usersPostHandler(w http.ResponseWriter, r *http.Request) {
@@ -43,9 +44,15 @@ func (app *Application) usersPostHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	app.background(func() {
+		activationURL, err := url.JoinPath(app.cfg.frontendURL, "activation")
+		if err != nil {
+			app.logError(err)
+			return
+		}
+		activationURL += "?" + url.Values{"token": {token.Plaintext}}.Encode()
 		templateData := map[string]any{
-			"user":            user,
-			"activationToken": token.Plaintext,
+			"user":          user,
+			"activationURL": activationURL,
 		}
 		if err := app.mailer.Send(user.Email, "user_welcome.tmpl", templateData); err != nil {
 			app.logError(err)

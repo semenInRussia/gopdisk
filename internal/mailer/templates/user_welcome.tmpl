@@ -1,26 +1,29 @@
-{{define "subject"}}Welcome to GopherDisk{{end}}
+{{define "subject"}}Подтвердите аккаунт GopherDisk{{end}}
 
 {{define "plainBody"}}
-Hi {{.user.Name}},
+Здравствуйте, {{.user.Name}}!
 
-Thanks for registering with GopherDisk.
+Спасибо за регистрацию в GopherDisk.
 
-Use the activation token below with PUT /v1/users/activated:
+Перейдите по ссылке и нажмите «Активировать аккаунт», чтобы подтвердить адрес электронной почты:
 
-{{.activationToken}}
+{{.activationURL}}
 
-This token expires in 3 days.
+Ссылка действует 3 дня. Само открытие страницы не активирует аккаунт.
+Если вы не регистрировались в GopherDisk, просто проигнорируйте это письмо.
 {{end}}
 
 {{define "htmlBody"}}
 <!doctype html>
-<html lang="en">
+<html lang="ru">
 <body>
-  <p>Hi {{.user.Name}},</p>
-  <p>Thanks for registering with GopherDisk.</p>
-  <p>Use this activation token with <code>PUT /v1/users/activated</code>:</p>
-  <p><strong>{{.activationToken}}</strong></p>
-  <p>This token expires in 3 days.</p>
+  <p>Здравствуйте, {{.user.Name}}!</p>
+  <p>Спасибо за регистрацию в GopherDisk.</p>
+  <p>Перейдите по ссылке и нажмите «Активировать аккаунт», чтобы подтвердить адрес электронной почты.</p>
+  <p><a href="{{.activationURL}}" style="display:inline-block;padding:12px 20px;background:#1769e0;color:#ffffff;border-radius:8px;text-decoration:none">Подтвердить email</a></p>
+  <p>Если кнопка не работает, откройте ссылку: <a href="{{.activationURL}}">{{.activationURL}}</a></p>
+  <p>Ссылка действует 3 дня. Само открытие страницы не активирует аккаунт.</p>
+  <p>Если вы не регистрировались в GopherDisk, просто проигнорируйте это письмо.</p>
 </body>
 </html>
 {{end}}

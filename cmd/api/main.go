@@ -11,6 +11,7 @@ import (
 	"gopherdisk/internal/mailer"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -32,6 +33,7 @@ const (
 )
 
 type Config struct {
+	frontendURL string
 	port        int
 	maxBlobSize int64
 	storage     struct {
@@ -67,6 +69,14 @@ func envOrDefault(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func validateFrontendURL(value string) error {
+	u, err := url.Parse(value)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || strings.Contains(value, "#") {
+		return errors.New("frontend URL must be an absolute HTTP(S) URL without credentials, query or fragment")
+	}
+	return nil
 }
 
 func envIntOrDefault(key string, fallback int) int {
@@ -151,6 +161,7 @@ func (app *Application) serve() error {
 
 func main() {
 	var cfg Config
+	flag.StringVar(&cfg.frontendURL, "frontend-url", envOrDefault("GOPHERDISK_FRONTEND_URL", "https://gopherdisk.online"), "public frontend URL used in activation emails")
 
 	flag.IntVar(&cfg.port, "port", 8080, "the port on which server will be located")
 	flag.Int64Var(&cfg.maxBlobSize, "blob", blobs.BlobsMaxSize, "maximum size of one blob")
@@ -168,6 +179,9 @@ func main() {
 	})
 
 	flag.Parse()
+	if err := validateFrontendURL(cfg.frontendURL); err != nil {
+		log.Fatal(err)
+	}
 
 	blobs.BlobsMaxSize = cfg.maxBlobSize
 

@@ -137,6 +137,22 @@ go run ./cmd/api
 
 Do not commit real SMTP credentials to the repository.
 
+Registration emails link to `https://gopherdisk.online/activation?token=…`.
+Set `GOPHERDISK_FRONTEND_URL` or pass `-frontend-url` to change the public
+frontend URL (the flag takes precedence). Use an absolute HTTP(S) URL without
+credentials, query parameters or a fragment. For local development:
+
+```bash
+GOPHERDISK_FRONTEND_URL='http://localhost:5173' go run ./cmd/api
+```
+
+Configure production hosting to serve the SPA's `index.html` for frontend
+routes such as `/activation`, including direct visits and refreshes, while
+keeping `/v1` routed to the API. Opening an activation link does not activate
+the account: the visitor must click “Активировать аккаунт”. “Не подтверждать”
+returns to login without changing the account or revoking the link. Links
+expire after 3 days and can only be used once. Activation does not sign in.
+
 Register a user with a name, email address, and password:
 
 ```bash
@@ -149,7 +165,8 @@ curl -X POST http://127.0.0.1:8080/v1/users \
   }'
 ```
 
-Submit the token from the verification email to activate the account:
+Open the link in the verification email and confirm activation on the page.
+Alternatively, submit its `token` query parameter directly to the API:
 
 ```bash
 curl -X PUT http://127.0.0.1:8080/v1/users/activated \

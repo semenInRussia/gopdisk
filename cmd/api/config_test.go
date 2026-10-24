@@ -2,6 +2,19 @@ package main
 
 import "testing"
 
+func TestValidateFrontendURL(t *testing.T) {
+	for _, value := range []string{"https://gopherdisk.online", "http://localhost:5173/", "https://example.com/disk/"} {
+		if err := validateFrontendURL(value); err != nil {
+			t.Errorf("valid URL %q: %v", value, err)
+		}
+	}
+	for _, value := range []string{"", "/relative", "ftp://example.com", "https://", "https://user:pass@example.com", "https://example.com?x=1", "https://example.com?", "https://example.com#token", "https://example.com#"} {
+		if err := validateFrontendURL(value); err == nil {
+			t.Errorf("accepted invalid URL %q", value)
+		}
+	}
+}
+
 func TestEnvOrDefault(t *testing.T) {
 	t.Run("environment value", func(t *testing.T) {
 		t.Setenv(envSMTPHost, "smtp.example.com")
