@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useAppDispatch, useAppSelector } from '../../app/hooks'
-import Icon, { type IconName } from '../../components/Icon'
+import Icon from '../../components/Icon'
 import StatusMessage from '../auth/StatusMessage'
-import { serializeApiError } from '../../api/client'
-import { openFile } from './openFile'
+import FileBrowser from './FileBrowser'
+import { formatBytes } from './filePresentation'
 import { createUploadQueue, emptyUploadQueue } from './uploadQueue'
 import { listenForPageFileDrops } from './pageFileDrop'
 import {
@@ -20,25 +20,6 @@ import {
 
 interface FileUploadProps {
   ownerId: string
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 Б'
-
-  const units = ['Б', 'КиБ', 'МиБ', 'ГиБ', 'ТиБ']
-  const unit = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
-  const value = bytes / 1024 ** unit
-  return `${value.toLocaleString('ru-RU', { maximumFractionDigits: unit === 0 ? 0 : 1 })} ${units[unit]}`
-}
-
-function describeFile(type: string, name: string): { icon: IconName; label: string } {
-  if (type.startsWith('image/')) return { icon: 'image', label: 'Изображение' }
-  if (type.startsWith('video/')) return { icon: 'video', label: 'Видео' }
-  if (type.startsWith('audio/')) return { icon: 'audio', label: 'Аудио' }
-  if (type === 'application/pdf') return { icon: 'file', label: 'Документ PDF' }
-  if (type.startsWith('text/')) return { icon: 'file', label: 'Текстовый документ' }
-  const extension = name.includes('.') ? name.split('.').pop()?.toUpperCase() : null
-  return { icon: 'file', label: extension ? `Файл ${extension}` : 'Файл' }
 }
 
 export default function FileUpload({ ownerId }: FileUploadProps) {
@@ -92,15 +73,6 @@ export default function FileUpload({ ownerId }: FileUploadProps) {
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     addFiles(Array.from(event.target.files ?? []))
     event.target.value = ''
-  }
-
-  async function handleOpenFile(id: string) {
-    setOpenError(null)
-    try {
-      await openFile(id, token)
-    } catch (error) {
-      setOpenError(serializeApiError(error).message)
-    }
   }
 
   const progress = upload.totalBytes === 0
@@ -204,31 +176,7 @@ export default function FileUpload({ ownerId }: FileUploadProps) {
             <button className="p-button p-button-secondary" type="button" onClick={() => setSearch('')}>Сбросить поиск</button>
           </div>
         )}
-        {visibleFiles.length > 0 && (
-          <ul className={`files-list${viewMode === 'grid' ? ' files-list--grid' : ''}`}>
-            {visibleFiles.map((file) => {
-              const presentation = describeFile(file.type, file.name)
-              return (
-                <li key={file.id}>
-                  <button
-                    className="file-open"
-                    type="button"
-                    onClick={() => handleOpenFile(file.id)}
-                    aria-label={`Открыть ${file.name} в новой вкладке${viewMode === 'list' ? `, ${formatBytes(file.size)}` : ''}`}
-                    title={`Открыть ${file.name} в новой вкладке`}
-                  >
-                    <span className={`file-icon file-icon--${presentation.icon}`}><Icon name={presentation.icon} /></span>
-                    <span className="file-details">
-                      <strong>{file.name}</strong>
-                      {viewMode === 'list' && <small>{presentation.label}</small>}
-                    </span>
-                    {viewMode === 'list' && <span className="file-size">{formatBytes(file.size)}</span>}
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
-        )}
+        <FileBrowser files={visibleFiles} viewMode={viewMode} token={token} onError={setOpenError} />
         {queue.total === 0 && <p className="upload-hint"><Icon name="compose" /> Добавьте файлы кнопкой справа внизу или перетащите их сюда.</p>}
       </section>
     </>

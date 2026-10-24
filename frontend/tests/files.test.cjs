@@ -14,6 +14,8 @@ require.extensions['.ts'] = (module, filename) => {
 
 const { apiBlobRequest, serializeApiError } = require('../src/api/client.ts')
 const { openFile } = require('../src/features/files/openFile.ts')
+const { deleteStoredFile, downloadStoredFile } = require('../src/features/files/fileActions.ts')
+const { selectFileIds, intersects } = require('../src/features/files/fileSelection.ts')
 const { default: filesReducer, uploadFile, loadFiles } = require('../src/features/files/filesSlice.ts')
 const { createUploadQueue } = require('../src/features/files/uploadQueue.ts')
 const { listenForPageFileDrops } = require('../src/features/files/pageFileDrop.ts')
@@ -62,6 +64,75 @@ function dragEvent(type, files = [], types = ['Files']) {
     dataTransfer: { files, types, dropEffect: 'none' },
   })
 }
+
+test('selects a single file, toggles individual files and extends ranges in visible order', () => {
+  const ids = ['a', 'b', 'c', 'd']
+  assert.deepEqual(selectFileIds(['a'], ids, 'c', 'a', { toggle: false, range: false }), ['c'])
+  assert.deepEqual(selectFileIds(['a'], ids, 'c', 'a', { toggle: true, range: false }), ['a', 'c'])
+  assert.deepEqual(selectFileIds(['a', 'c'], ids, 'a', 'c', { toggle: true, range: false }), ['c'])
+  assert.deepEqual(selectFileIds(['d'], ids, 'a', 'c', { toggle: false, range: true }), ['a', 'b', 'c'])
+  assert.deepEqual(selectFileIds(['d'], ids, 'c', 'a', { toggle: true, range: true }), ['d', 'a', 'b', 'c'])
+  assert.deepEqual(selectFileIds(['d'], ids, 'b', 'hidden', { toggle: false, range: true }), ['b'])
+  assert.deepEqual(selectFileIds(['d'], ids, 'hidden', 'a', { toggle: false, range: true }), ['d'])
+})
+
+test('marquee includes partially overlapping files but excludes files outside its bounds', () => {
+  const box = { left: 10, top: 10, right: 100, bottom: 100 }
+  assert.equal(intersects(box, { left: 90, top: 90, right: 150, bottom: 150 }), true)
+  assert.equal(intersects(box, { left: 20, top: 20, right: 40, bottom: 40 }), true)
+  assert.equal(intersects(box, { left: 100, top: 10, right: 150, bottom: 100 }), false)
+  assert.equal(intersects(box, { left: 10, top: 101, right: 100, bottom: 150 }), false)
+})
+
+test('deletes files with authentication and reports rejected deletions', async (t) => {
+  const originalFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = originalFetch })
+  globalThis.fetch = async (path, options) => {
+    assert.equal(path, '/v1/files/file%2Fid')
+    assert.equal(options.method, 'DELETE')
+    assert.equal(options.headers.get('Authorization'), 'Bearer token')
+    return new Response(null, { status: 204 })
+  }
+  await deleteStoredFile('file/id', 'token')
+  globalThis.fetch = async () => json({ error: 'Нет доступа' }, 403)
+  await assert.rejects(deleteStoredFile('file/id', 'token'), /Нет доступа/)
+})
+
+test('downloads authenticated content with its filename and releases the temporary URL', async (t) => {
+  const previous = { fetch: globalThis.fetch, document: globalThis.document, create: URL.createObjectURL, revoke: URL.revokeObjectURL }
+  t.after(() => {
+    globalThis.fetch = previous.fetch
+    if (previous.document === undefined) delete globalThis.document
+    else globalThis.document = previous.document
+    URL.createObjectURL = previous.create
+    URL.revokeObjectURL = previous.revoke
+  })
+  let clicked = false
+  let removed = false
+  let cleanup
+  const revoked = []
+  const link = { click() { clicked = true }, remove() { removed = true } }
+  globalThis.document = { createElement: () => link, body: { append() {} } }
+  mockWindow(t, { setTimeout(callback) { cleanup = callback } })
+  URL.createObjectURL = (blob) => { assert.equal(blob.size, 7); return 'blob:download' }
+  URL.revokeObjectURL = (url) => revoked.push(url)
+  globalThis.fetch = async (path, options) => {
+    assert.equal(path, '/v1/files/file%2Fid/content')
+    assert.equal(options.headers.get('Authorization'), 'Bearer token')
+    return new Response('content')
+  }
+  await downloadStoredFile('file/id', 'Отчёт.txt', 'token')
+  assert.equal(link.download, 'Отчёт.txt')
+  assert.equal(link.href, 'blob:download')
+  assert.ok(clicked && removed)
+  assert.deepEqual(revoked, [])
+  cleanup()
+  assert.deepEqual(revoked, ['blob:download'])
+  clicked = false
+  globalThis.fetch = async () => json({ error: 'Нет доступа' }, 403)
+  await assert.rejects(downloadStoredFile('file/id', 'Отчёт.txt', 'token'), /Нет доступа/)
+  assert.equal(clicked, false)
+})
 
 test('accepts multiple files dropped on the page and prevents browser navigation', () => {
   const page = new EventTarget()
