@@ -1,5 +1,5 @@
 import { useEffect, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAppDispatch, useAppSelector } from '../../app/hooks'
 import { feedbackCleared, login } from './authSlice'
 import StatusMessage from './StatusMessage'
@@ -7,6 +7,7 @@ import StatusMessage from './StatusMessage'
 export default function Login() {
   const dispatch = useAppDispatch()
   const navigate = useNavigate()
+  const [params] = useSearchParams()
   const { requestStatus, error } = useAppSelector((state) => state.auth)
 
   useEffect(() => {
@@ -22,7 +23,8 @@ export default function Login() {
         email: String(form.get('email') ?? ''),
         password: String(form.get('password') ?? ''),
       })).unwrap()
-      navigate('/profile', { replace: true })
+      const linkedFile = params.get('file')
+      navigate(linkedFile ? `/files/${encodeURIComponent(linkedFile)}` : '/profile', { replace: true })
     } catch {
       // The slice exposes the normalized API error.
     }

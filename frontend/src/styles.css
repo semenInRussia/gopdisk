@@ -37,12 +37,13 @@ body {
 }
 
 .auth-card {
+  --gd-card-padding: clamp(24px, 5vw, 48px);
   background: var(--gd-surface);
   border: 1px solid var(--gd-divider);
   border-radius: 20px;
   color: var(--p-text-primary);
   min-width: 0;
-  padding: clamp(24px, 5vw, 48px);
+  padding: var(--gd-card-padding);
   width: min(960px, calc(100vw - 64px));
 }
 
@@ -552,27 +553,62 @@ body {
 }
 
 .file-search {
+  flex: 0 0 auto;
+  height: 44px;
+  max-width: 100%;
   position: relative;
-  width: min(260px, 100%);
+  width: 44px;
+  transition: width 380ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.file-search > svg {
-  position: absolute;
-  z-index: 1;
-  left: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--p-text-secondary);
-  height: 16px;
-  width: 16px;
-  pointer-events: none;
+.file-search--open {
+  width: 260px;
 }
 
 .file-search .p-field {
-  --p-field-height: 36px;
+  --p-field-height: 44px;
   --p-field-font: 0.8125rem;
+  inset: 0;
+  opacity: 0;
+  padding-inline: 44px;
+  pointer-events: none;
+  position: absolute;
+  transition: opacity 180ms ease;
   width: 100%;
-  padding-left: 34px;
+  min-width: 0;
+}
+
+.file-search--open .p-field {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.file-search .p-field::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+
+.file-search .file-search-trigger,
+.file-search .file-search-close {
+  --p-button-height: 44px;
+  border-radius: 12px;
+  color: var(--p-text-secondary);
+  height: 44px;
+  position: absolute;
+  top: 0;
+  width: 44px;
+}
+
+.file-search-trigger {
+  left: 0;
+}
+
+.file-search-close {
+  right: 0;
+}
+
+.file-search .p-button > svg {
+  height: 18px;
+  width: 18px;
 }
 
 .upload-summary {
@@ -707,7 +743,13 @@ body {
 }
 
 .files-list--grid li {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gd-space-2);
   min-width: 0;
+  padding: var(--gd-space-3) var(--gd-space-2);
+  text-align: center;
 }
 
 .files-list--grid .file-open {
@@ -715,11 +757,14 @@ body {
   border: 0;
   box-shadow: none;
   grid-template-columns: minmax(0, 1fr);
-  height: 100%;
-  align-content: start;
+  height: 64px;
+  width: 64px;
+  min-height: 0;
+  flex-shrink: 0;
+  align-content: center;
   justify-items: center;
-  gap: var(--gd-space-2);
-  padding: var(--gd-space-3) var(--gd-space-2);
+  gap: 0;
+  padding: 0;
   text-align: center;
 }
 
@@ -797,15 +842,35 @@ body {
   font-weight: 500;
 }
 
+.file-toolbar-sentinel {
+  height: 1px;
+  margin-top: var(--gd-space-4);
+  margin-bottom: -1px;
+  pointer-events: none;
+}
+
 .file-selection-toolbar {
   align-items: center;
+  background: var(--gd-surface);
+  border-bottom: 1px solid transparent;
   color: var(--p-text-secondary);
   display: flex;
   flex-wrap: wrap;
   font-size: 0.8125rem;
   gap: var(--gd-space-3);
   justify-content: space-between;
-  margin-top: var(--gd-space-4);
+  padding-block: var(--gd-space-3);
+}
+
+.file-selection-toolbar--stuck {
+  border-bottom-color: var(--gd-divider);
+  box-shadow: 0 8px 16px -12px var(--p-text-secondary);
+  left: 0;
+  right: 0;
+  top: 0;
+  padding-inline: clamp(16px, 4vw, 48px);
+  position: fixed;
+  z-index: 35;
 }
 
 .file-selection-actions {
@@ -820,6 +885,10 @@ body {
   padding-bottom: var(--gd-space-6);
   user-select: none;
   -webkit-user-select: none;
+}
+
+.file-browser-content .file-open {
+  scroll-margin-top: 128px;
 }
 
 .file-browser-content:focus-visible {
@@ -883,6 +952,120 @@ body {
   color: var(--p-sys-red);
 }
 
+.file-context-menu button:disabled {
+  color: var(--p-text-tertiary);
+  cursor: default;
+}
+
+.permissions-dialog {
+  background: var(--gd-surface);
+  border: 1px solid var(--gd-divider);
+  border-radius: 20px;
+  box-shadow: var(--p-shadow-overlay);
+  color: var(--p-text-primary);
+  max-height: calc(100dvh - 32px);
+  max-width: calc(100vw - 32px);
+  overflow-y: auto;
+  padding: clamp(20px, 4vw, 32px);
+  width: 620px;
+}
+
+.permissions-dialog::backdrop {
+  background: color-mix(in srgb, var(--p-text-primary) 25%, transparent);
+}
+
+.permissions-dialog-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.permissions-dialog-header h2 {
+  font-size: 1.5rem;
+  margin: 0;
+}
+
+.permissions-dialog-header p {
+  color: var(--p-text-secondary);
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.permissions-dialog-header > button {
+  flex-shrink: 0;
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.permissions-users {
+  list-style: none;
+  margin: 24px 0;
+  padding: 0;
+}
+
+.permissions-users li {
+  border-bottom: 1px solid var(--gd-divider);
+  padding-block: 16px;
+}
+
+.permissions-users strong {
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+
+.permissions-users p {
+  color: var(--p-text-secondary);
+  font-size: 0.8125rem;
+  margin: 6px 0 12px;
+}
+
+.permissions-user-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.permissions-editor {
+  border: 0;
+  margin: 24px 0 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.permissions-editor legend {
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.permissions-choices {
+  display: grid;
+  margin-top: 12px;
+}
+
+.permissions-choices label {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-height: 44px;
+}
+
+.permissions-editor .form-actions {
+  margin-top: 24px;
+}
+
+.share-file-field,
+.share-file-actions {
+  margin-top: 24px;
+}
+
+.share-permissions-title {
+  border-top: 1px solid var(--gd-divider);
+  font-size: 1rem;
+  margin: 24px 0 0;
+  padding-top: 24px;
+}
+
 @media (forced-colors: active) {
   .file-open.file-open--selected,
   .files-list--grid .file-open.file-open--selected {
@@ -928,7 +1111,8 @@ body {
   .auth-card--compact,
   .profile-card {
     border-radius: 20px;
-    padding: var(--gd-space-6);
+    --gd-card-padding: var(--gd-space-6);
+    padding: var(--gd-card-padding);
     width: 100%;
   }
 
@@ -959,10 +1143,6 @@ body {
   .profile-header {
     align-items: flex-start;
     gap: 12px;
-  }
-
-  .file-search {
-    width: 100%;
   }
 
   .files-toolbar-actions {
@@ -1013,6 +1193,7 @@ body {
   .p-button::before,
   .p-button::after,
   .p-field,
+  .file-search,
   .file-view-control .p-segment > span,
   .file-open {
     transition: none;

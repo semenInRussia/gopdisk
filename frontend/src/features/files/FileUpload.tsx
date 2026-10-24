@@ -4,6 +4,7 @@ import { useAppDispatch, useAppSelector } from '../../app/hooks'
 import Icon from '../../components/Icon'
 import StatusMessage from '../auth/StatusMessage'
 import FileBrowser from './FileBrowser'
+import FileSearch from './FileSearch'
 import { formatBytes } from './filePresentation'
 import { createUploadQueue, emptyUploadQueue } from './uploadQueue'
 import { listenForPageFileDrops } from './pageFileDrop'
@@ -116,11 +117,7 @@ export default function FileUpload({ ownerId }: FileUploadProps) {
             <span className="file-count" aria-label={`Всего файлов: ${files.length}`}>{files.length}</span>
           </div>
           <div className="files-toolbar-actions">
-            <label className="file-search">
-              <Icon name="search" />
-              <span className="visually-hidden">Поиск файлов по имени</span>
-              <input className="p-field" type="search" placeholder="Поиск файлов" value={search} onChange={(event) => setSearch(event.target.value)} />
-            </label>
+            <FileSearch value={search} onChange={setSearch} />
             <div className="p-segmented p-segmented-large file-view-control" role="group" aria-label="Вид файлов">
               <label className="p-segment">
                 <input type="radio" name="file-view" value="list" checked={viewMode === 'list'} onChange={() => dispatch(fileViewModeChanged('list'))} />

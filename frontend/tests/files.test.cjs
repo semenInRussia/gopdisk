@@ -14,8 +14,10 @@ require.extensions['.ts'] = (module, filename) => {
 
 const { apiBlobRequest, serializeApiError } = require('../src/api/client.ts')
 const { openFile } = require('../src/features/files/openFile.ts')
-const { deleteStoredFile, downloadStoredFile } = require('../src/features/files/fileActions.ts')
+const { copyStoredFilePath, deleteStoredFile, downloadStoredFile, downloadStoredFiles } = require('../src/features/files/fileActions.ts')
+const { BlobReader, ZipReader, Uint8ArrayWriter } = require('@zip.js/zip.js')
 const { selectFileIds, intersects } = require('../src/features/files/fileSelection.ts')
+const { loadFilePermissions, saveFilePermissions, revokeFilePermissions } = require('../src/features/permissions/permissionsApi.ts')
 const { default: filesReducer, uploadFile, loadFiles } = require('../src/features/files/filesSlice.ts')
 const { createUploadQueue } = require('../src/features/files/uploadQueue.ts')
 const { listenForPageFileDrops } = require('../src/features/files/pageFileDrop.ts')
@@ -64,6 +66,92 @@ function dragEvent(type, files = [], types = ['Files']) {
     dataTransfer: { files, types, dropEffect: 'none' },
   })
 }
+
+test('copies an application file link and falls back when the clipboard API is denied or unavailable', async (t) => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  const originalDocument = globalThis.document
+  let fallbackCopies = 0
+  let selected = false
+  let removed = false
+  let restored = false
+  const field = { style: {}, focus() {}, setSelectionRange() {}, select() { selected = true }, remove() { removed = true } }
+  globalThis.document = {
+    activeElement: { focus() { restored = true } },
+    createElement: () => field,
+    body: { append() {} },
+    execCommand(command) {
+      assert.equal(command, 'copy')
+      assert.equal(field.value, 'https://disk.example/files/file%2Fid')
+      assert.ok(selected)
+      fallbackCopies++
+      return true
+    },
+  }
+  const clipboard = { async writeText(value) { assert.equal(value, 'https://disk.example/files/file%2Fid') } }
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { clipboard } })
+  t.after(() => {
+    if (descriptor) Object.defineProperty(globalThis, 'navigator', descriptor)
+    else delete globalThis.navigator
+    if (originalDocument === undefined) delete globalThis.document
+    else globalThis.document = originalDocument
+  })
+  mockWindow(t, { location: { origin: 'https://disk.example' } })
+  await copyStoredFilePath('file/id')
+  assert.equal(fallbackCopies, 0)
+  clipboard.writeText = async () => { throw new Error('Clipboard denied') }
+  await copyStoredFilePath('file/id')
+  assert.equal(fallbackCopies, 1)
+  assert.ok(removed && restored)
+  delete globalThis.navigator.clipboard
+  await copyStoredFilePath('file/id')
+  assert.equal(fallbackCopies, 2)
+  let asyncCopies = 0
+  globalThis.navigator.clipboard = { async writeText() { asyncCopies++ } }
+  await copyStoredFilePath('file/id', field)
+  assert.equal(fallbackCopies, 3)
+  assert.equal(asyncCopies, 0)
+  delete globalThis.navigator.clipboard
+  globalThis.document.execCommand = () => false
+  await assert.rejects(copyStoredFilePath('file/id'), /Не удалось скопировать ссылку/)
+})
+
+test('loads, replaces and revokes file permissions through authenticated endpoints', async (t) => {
+  const originalFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = originalFetch })
+  const permissions = [{ file_id: 'file/id', user_id: 'user/id', code: 'files:read' }]
+  const requests = []
+  globalThis.fetch = async (path, options) => {
+    assert.equal(options.headers.get('Authorization'), 'Bearer token')
+    requests.push({ path, method: options.method ?? 'GET', body: options.body })
+    return options.method ? new Response(null, { status: 204 }) : json({ permissions })
+  }
+  assert.deepEqual(await loadFilePermissions('file/id', 'token'), permissions)
+  await saveFilePermissions('file/id', 'user/id', ['files:read', 'files:delete'], 'token')
+  await saveFilePermissions('file/id', 'user/id', [], 'token')
+  await revokeFilePermissions('file/id', 'user/id', 'token')
+  assert.deepEqual(requests, [
+    { path: '/v1/files/file%2Fid/permissions', method: 'GET', body: undefined },
+    { path: '/v1/files/file%2Fid/permissions/user%2Fid', method: 'PUT', body: JSON.stringify({ codes: ['files:read', 'files:delete'] }) },
+    { path: '/v1/files/file%2Fid/permissions/user%2Fid', method: 'PUT', body: JSON.stringify({ codes: [] }) },
+    { path: '/v1/files/file%2Fid/permissions/user%2Fid', method: 'DELETE', body: undefined },
+  ])
+})
+
+test('reports permission API failures and supports cancelling permission loading', async (t) => {
+  const originalFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = originalFetch })
+  globalThis.fetch = async () => json({ error: 'Нет доступа' }, 403)
+  await assert.rejects(loadFilePermissions('file', 'token'), /Нет доступа/)
+  await assert.rejects(saveFilePermissions('file', 'user', ['files:read'], 'token'), /Нет доступа/)
+  await assert.rejects(revokeFilePermissions('file', 'user', 'token'), /Нет доступа/)
+  const controller = new AbortController()
+  controller.abort()
+  globalThis.fetch = async (_path, options) => {
+    assert.equal(options.signal, controller.signal)
+    options.signal.throwIfAborted()
+  }
+  await assert.rejects(loadFilePermissions('file', 'token', controller.signal), { name: 'AbortError' })
+})
 
 test('selects a single file, toggles individual files and extends ranges in visible order', () => {
   const ids = ['a', 'b', 'c', 'd']
@@ -132,6 +220,59 @@ test('downloads authenticated content with its filename and releases the tempora
   globalThis.fetch = async () => json({ error: 'Нет доступа' }, 403)
   await assert.rejects(downloadStoredFile('file/id', 'Отчёт.txt', 'token'), /Нет доступа/)
   assert.equal(clicked, false)
+})
+
+test('downloads all selected files as one valid ZIP, including duplicate names, Unicode, binary and empty files', async (t) => {
+  const originalDocument = globalThis.document
+  t.after(() => {
+    if (originalDocument === undefined) delete globalThis.document
+    else globalThis.document = originalDocument
+  })
+  let archive
+  const downloads = []
+  const names = ['Отчёт.txt', 'Отчёт.txt', '../Отчёт (2).txt', 'empty.bin', 'C:\\folder\\other.bin']
+  const contents = [Buffer.from('first'), Buffer.from('second'), Buffer.from('third'), Buffer.alloc(0), Buffer.from([0, 255, 128, 10])]
+  const files = names.map((name, index) => ({ id: `id-${index}`, name }))
+  globalThis.document = {
+    createElement: () => ({ click() { downloads.push(this.download) }, remove() {} }),
+    body: { append() {} },
+  }
+  mockWindow(t, { setTimeout() {} })
+  t.mock.method(URL, 'createObjectURL', (blob) => { archive = blob; return 'blob:archive' })
+  const requests = []
+  t.mock.method(globalThis, 'fetch', async (path, options) => {
+    assert.equal(options.headers.get('Authorization'), 'Bearer token')
+    requests.push(path)
+    const index = files.findIndex((file) => path === `/v1/files/${file.id}/content`)
+    assert.ok(index >= 0)
+    return new Response(contents[index])
+  })
+  const progress = []
+  await downloadStoredFiles(files, 'token', (completed, total) => progress.push([completed, total]))
+  assert.deepEqual(downloads, ['GopherDisk.zip'])
+  assert.equal(requests.length, files.length)
+  assert.deepEqual(progress, Array.from({ length: 6 }, (_, index) => [index, 5]))
+  const reader = new ZipReader(new BlobReader(archive), { useWebWorkers: false })
+  try {
+    const entries = await reader.getEntries()
+    assert.deepEqual(entries.map((entry) => entry.filename), ['Отчёт.txt', 'Отчёт (2).txt', 'Отчёт (2) (2).txt', 'empty.bin', 'other.bin'])
+    for (const [index, entry] of entries.entries()) {
+      const bytes = await entry.getData(new Uint8ArrayWriter(), { checkSignature: true })
+      assert.deepEqual(Buffer.from(bytes), contents[index])
+    }
+  } finally {
+    await reader.close()
+  }
+})
+
+test('does not download a partial archive when one selected file fails', async (t) => {
+  t.mock.method(globalThis, 'fetch', async (path) => path.includes('missing')
+    ? json({ error: 'Нет доступа' }, 403)
+    : new Response('first file'))
+  const createURL = t.mock.method(URL, 'createObjectURL', () => assert.fail('Must not download a partial archive'))
+  await assert.rejects(downloadStoredFiles([{ id: 'ok', name: 'first.txt' }, { id: 'missing', name: 'second.txt' }], 'token'), /second.txt: Нет доступа/)
+  assert.equal(createURL.mock.callCount(), 0)
+  await downloadStoredFiles([], 'token')
 })
 
 test('accepts multiple files dropped on the page and prevents browser navigation', () => {
@@ -474,7 +615,7 @@ test('opens raw video content in a new tab and releases its URL after closing', 
   await openFile('video-id', 'test-token')
   assert.equal(location, 'blob:video')
   assert.equal(tab.opener, null)
-  assert.ok(cleared)
+  assert.equal(cleared, false)
   checkClosed()
   assert.equal(revoke.mock.callCount(), 0)
   tab.closed = true

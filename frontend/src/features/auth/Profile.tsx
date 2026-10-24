@@ -6,6 +6,7 @@ import FileUpload from '../files/FileUpload'
 import { filesCleared } from '../files/filesSlice'
 import { currentUserSet, selectCurrentUser } from '../users/usersSlice'
 import { signedOut } from './authSlice'
+import { permissionsCleared } from '../permissions/permissionsSlice'
 
 export default function Profile() {
   const dispatch = useAppDispatch()
@@ -45,6 +46,7 @@ export default function Profile() {
     dispatch(signedOut())
     dispatch(currentUserSet(null))
     dispatch(filesCleared())
+    dispatch(permissionsCleared())
     navigate('/login', { replace: true })
   }
 

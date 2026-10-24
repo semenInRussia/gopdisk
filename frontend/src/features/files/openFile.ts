@@ -7,8 +7,6 @@ export async function openFile(id: string, token: string | null): Promise<void> 
     throw new Error('Браузер заблокировал новую вкладку. Разрешите всплывающие окна для этого сайта.')
   }
   tab.opener = null
-  // The content tab does not need the copy of the application's session.
-  tab.sessionStorage.clear()
 
   let url: string | undefined
   try {
