@@ -1,5 +1,41 @@
 # GopherDisk
 
+## Deployment
+
+The [deployment workflow](.github/workflows/deploy.yml) runs on pushes to `prod`
+or manually with `prod` selected. It connects over SSH and runs everything on
+the existing server: stop both services, update `/root/gopdisk`, write `.env`,
+apply migrations, check formatting, run vet and tests, build, and start both
+services. It does not create containers or databases.
+
+Create a GitHub environment named `production`, restrict its deployment branch
+to `prod`, and add these environment secrets:
+
+| Secret | Value |
+| --- | --- |
+| `DEPLOY_HOST` | Server hostname or IP |
+| `DEPLOY_PORT` | Optional SSH port; defaults to `22` |
+| `DEPLOY_USER` | `root`, matching the existing service units |
+| `DEPLOY_SSH_KEY` | Dedicated private SSH key authorized on the server |
+| `DEPLOY_HOST_FINGERPRINT` | Verified server SSH host-key fingerprint (`SHA256:...`) |
+| `DATABASE_URL` | Production PostgreSQL connection URL |
+| `GOPHER_SMTP_USERNAME` | SMTP login |
+| `GOPHER_SMTP_PASSWORD` | SMTP password |
+
+The server needs Bash, Git, Go matching `go.mod`, Node 22.22.2 or newer compatible
+with the frontend dependencies, npm, the existing checkout, and both systemd
+units. Root must be able to fetch `origin` without interaction. PostgreSQL must
+already be running with migration history tracked by `cmd/migrate up`.
+
+Each deployment rewrites `.env` with only the three application secrets, using
+the correct `GOPHERDISK_SMTP_*` names and permissions `0600`. Secret values must
+be single-line. Uploaded blobs in `data` are not removed. Database integration
+tests are skipped so they cannot modify production data; the other Go and
+frontend tests run on the server.
+
+If migrations, checks, or builds fail, the workflow stops and services remain
+stopped. Applied migrations are not rolled back. Fix the failure and rerun.
+
 ## Run Tests With PostgreSQL
 
 Start a local PostgreSQL database for tests:

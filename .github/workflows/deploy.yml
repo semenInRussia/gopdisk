@@ -1,0 +1,71 @@
+name: Deploy
+
+on:
+  push:
+    branches: [prod]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/prod'
+    runs-on: ubuntu-24.04
+    environment: production
+    steps:
+      - name: Update and restart the server
+        uses: appleboy/ssh-action@v1
+        env:
+          DEPLOY_SHA: ${{ github.sha }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GOPHERDISK_SMTP_USERNAME: ${{ secrets.GOPHER_SMTP_USERNAME }}
+          GOPHERDISK_SMTP_PASSWORD: ${{ secrets.GOPHER_SMTP_PASSWORD }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT || '22' }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          fingerprint: ${{ secrets.DEPLOY_HOST_FINGERPRINT }}
+          envs: DEPLOY_SHA,DATABASE_URL,GOPHERDISK_SMTP_USERNAME,GOPHERDISK_SMTP_PASSWORD
+          command_timeout: 30m
+          script: |
+            bash -se <<'DEPLOY'
+            export PATH="/usr/local/go/bin:$PATH"
+            cd /root/gopdisk
+
+            systemctl stop gopdisk.service gopdisk-frontend.service
+
+            git fetch origin prod
+            git checkout --detach "$DEPLOY_SHA"
+
+            umask 077
+            : > .env
+            for key in GOPHERDISK_SMTP_USERNAME GOPHERDISK_SMTP_PASSWORD DATABASE_URL; do
+              value=${!key}
+              value=${value//\\/\\\\}
+              value=${value//\"/\\\"}
+              printf '%s="%s"\n' "$key" "$value" >> .env
+            done
+            chmod 600 .env
+
+            go run ./cmd/migrate up
+
+            # Integration tests must not modify the live database.
+            unset GOPHERDISK_DATABASE_TEST_URL GOPHERDISK_GARBAGE_COLLECTION_TEST_URL
+            test -z "$(gofmt -l cmd internal)"
+            go vet ./...
+            go test ./...
+            go build -o api ./cmd/api
+
+            cd frontend
+            npm ci --include=dev
+            npm test
+            npm run build
+
+            systemctl start gopdisk.service gopdisk-frontend.service
+            DEPLOY
