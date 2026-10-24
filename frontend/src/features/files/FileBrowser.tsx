@@ -12,6 +12,7 @@ import { openFile } from './openFile'
 import { animateFileDeletion } from './fileDeletionAnimation'
 import { selectCurrentUser } from '../users/usersSlice'
 import ShareFileDialog, { type CopyStatus } from './ShareFileDialog'
+import DeleteConfirmation from './DeleteConfirmation'
 
 interface Props {
   files: StoredFile[]
@@ -28,6 +29,8 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
   const [shareOrigin, setShareOrigin] = useState<SurfaceOrigin>({ x: 0, y: 0 })
   const [copyStatus, setCopyStatus] = useState<CopyStatus>('copying')
   const [busy, setBusy] = useState(false)
+  const [deleteTargets, setDeleteTargets] = useState<StoredFile[] | null>(null)
+  const [deleteAnchor, setDeleteAnchor] = useState<DOMRect | null>(null)
   const [downloadProgress, setDownloadProgress] = useState<string | null>(null)
   const [toolbarStuck, setToolbarStuck] = useState(false)
   const [toolbarFloating, setToolbarFloating] = useState(false)
@@ -194,11 +197,15 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
     }
   }, [menu])
 
-  async function runAction(action: 'download' | 'delete') {
-    if (busy || selectedFiles.length === 0) return
+  async function runAction(action: 'download' | 'delete', confirmedFiles?: StoredFile[], trigger?: HTMLElement) {
+    const targets = [...(confirmedFiles ?? selectedFiles)]
+    if (busy || targets.length === 0) return
     closeMenu()
-    const targets = [...selectedFiles]
-    if (action === 'delete' && !window.confirm(`Удалить файлов: ${targets.length}?\n${targets.slice(0, 5).map((file) => file.name).join('\n')}${targets.length > 5 ? '\n…' : ''}\nЭто действие нельзя отменить.`)) return
+    if (action === 'delete' && !confirmedFiles) {
+      setDeleteAnchor((trigger ?? (document.activeElement as HTMLElement | null))?.getBoundingClientRect() ?? null)
+      setDeleteTargets(targets)
+      return
+    }
     setBusy(true)
     onError(null)
     const failures: string[] = []
@@ -273,7 +280,7 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
       else { setSelected([]); endSelection() }
     } else if ((event.key === 'Delete' || event.key === 'Backspace') && selectedFiles.length) {
       event.preventDefault()
-      void runAction('delete')
+      void runAction('delete', undefined, event.target as HTMLElement)
     } else if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key) && !busy) {
       event.preventDefault()
       const buttons = [...(root.current?.querySelectorAll<HTMLButtonElement>('[data-file-id]') ?? [])]
@@ -301,7 +308,7 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
           <div className="file-selection-actions">
             <button type="button" className="p-button p-button-secondary" disabled={busy || selectedFiles.length !== 1} onClick={(event) => void shareFile(event)}>Права доступа</button>
             <button type="button" className="p-button p-button-secondary" disabled={busy || !selectedFiles.length} onClick={() => void runAction('download')}>Скачать</button>
-            <button type="button" className="p-button p-button-destructive" disabled={busy || !selectedFiles.length} onClick={() => void runAction('delete')}>Удалить</button>
+            <button type="button" className="p-button p-button-destructive" disabled={busy || !selectedFiles.length} onClick={(event) => void runAction('delete', undefined, event.currentTarget)}>Удалить</button>
           </div>
         </div>
       </div>
@@ -361,12 +368,20 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
         <button type="button" role="menuitem" className="p-menu__item" onClick={() => void runAction('download')}><span className="p-menu__icon"><Icon name="download" /></span>Скачать{selectedFiles.length > 1 ? ` (${selectedFiles.length})` : ''}</button>
         <button type="button" role="menuitem" className="p-menu__item" disabled={selectedFiles.length !== 1} title="Права доступа и ссылка на выбранный файл" onClick={(event) => void shareFile(event)}><span className="p-menu__icon"><Icon name="lock" /></span>Права доступа</button>
         <div className="p-menu__separator" role="separator" />
-        <button type="button" role="menuitem" className="p-menu__item p-menu__item--destructive" onClick={() => void runAction('delete')}><span className="p-menu__icon"><Icon name="trash" /></span>Удалить{selectedFiles.length > 1 ? ` (${selectedFiles.length})` : ''}</button>
+        <button type="button" role="menuitem" className="p-menu__item p-menu__item--destructive" onClick={(event) => void runAction('delete', undefined, event.currentTarget)}><span className="p-menu__icon"><Icon name="trash" /></span>Удалить{selectedFiles.length > 1 ? ` (${selectedFiles.length})` : ''}</button>
       </div>, document.body)}
       {sharedFile && <ShareFileDialog key={sharedFile.id} file={sharedFile} origin={shareOrigin} initialStatus={copyStatus} token={token} canManagePermissions={sharedFile.owner_id === currentUser?.id} onClose={() => {
         setSharedFile(null)
         if (returnFocus.current?.isConnected) returnFocus.current.focus()
         root.current?.focus()
+      }} />}
+      {deleteTargets && <DeleteConfirmation files={deleteTargets} anchor={deleteAnchor} onCancel={() => {
+        setDeleteTargets(null)
+        root.current?.focus({ preventScroll: true })
+      }} onConfirm={() => {
+        const targets = deleteTargets
+        setDeleteTargets(null)
+        void runAction('delete', targets)
       }} />}
     </section>
   )

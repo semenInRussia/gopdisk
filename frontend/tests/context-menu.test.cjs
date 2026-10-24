@@ -26,7 +26,7 @@ globalThis.ResizeObserver = globalThis.IntersectionObserver = class {
   disconnect() {}
 }
 window.HTMLDialogElement.prototype.showModal = function () { this.open = true }
-window.HTMLDialogElement.prototype.close = function () { this.open = false; this.dispatchEvent(new window.Event('close')) }
+window.HTMLDialogElement.prototype.close = function (value = '') { this.returnValue = value; this.open = false; this.dispatchEvent(new window.Event('close')) }
 
 const React = require('react')
 const { act } = React
@@ -87,10 +87,12 @@ test('context menu downloads the right-clicked file despite a blur before click'
 
 test('context menu deletes the right-clicked file despite a blur before click', async (t) => {
   const remove = t.mock.method(actions, 'deleteStoredFile', async () => {})
-  t.mock.method(window, 'confirm', () => true)
   const store = await render(t)
   await openMenu()
   await activate('Удалить')
+  assert.equal(remove.mock.callCount(), 0)
+  assert.ok(document.querySelector('.p-desktop-modal[open]'))
+  await act(async () => document.querySelector('#file-delete-dialog .p-desktop-modal__action--destructive').click())
   assert.equal(remove.mock.callCount(), 1)
   assert.deepEqual(remove.mock.calls[0].arguments, [file.id, 'token'])
   assert.deepEqual(store.getState().files.ids, [])
@@ -99,7 +101,6 @@ test('context menu deletes the right-clicked file despite a blur before click', 
 test('file falls only after server deletion succeeds and is removed after the animation', async (t) => {
   let acknowledge
   t.mock.method(actions, 'deleteStoredFile', () => new Promise((resolve) => { acknowledge = resolve }))
-  t.mock.method(window, 'confirm', () => true)
   t.mock.method(window, 'matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }))
   const animations = []
   const prototype = window.HTMLElement.prototype
@@ -112,6 +113,7 @@ test('file falls only after server deletion succeeds and is removed after the an
   const store = await render(t)
   await openMenu()
   await activate('Удалить')
+  await act(async () => document.querySelector('#file-delete-dialog .p-desktop-modal__action--destructive').click())
   assert.equal(animations.length, 0)
   assert.deepEqual(store.getState().files.ids, [file.id])
   await act(async () => acknowledge())
@@ -122,6 +124,59 @@ test('file falls only after server deletion succeeds and is removed after the an
   assert.deepEqual(store.getState().files.ids, [file.id])
   await act(async () => animations[0].finish())
   assert.deepEqual(store.getState().files.ids, [])
+})
+
+test('delete confirmation focuses Cancel and cancels without deleting on button or Escape', async (t) => {
+  const remove = t.mock.method(actions, 'deleteStoredFile', async () => {})
+  const store = await render(t)
+  for (const method of ['button', 'escape']) {
+    await openMenu()
+    await activate('Удалить')
+    const dialog = document.querySelector('.p-desktop-modal[open]')
+    const cancel = dialog.querySelector('.p-desktop-modal__action--secondary')
+    assert.equal(document.activeElement, cancel)
+    assert.ok(dialog.textContent.includes(file.name))
+    await act(async () => {
+      if (method === 'button') cancel.click()
+      else dialog.dispatchEvent(new window.Event('cancel', { cancelable: true }))
+    })
+    assert.equal(document.querySelector('#file-delete-dialog'), null)
+    assert.equal(remove.mock.callCount(), 0)
+    assert.deepEqual(store.getState().files.ids, [file.id])
+    assert.equal(document.querySelector('[data-file-id]').getAttribute('aria-pressed'), 'true')
+  }
+})
+
+test('delete modal keeps Puppertino typography under p-type and resets native dialog chrome', async (t) => {
+  const path = require('node:path')
+  const typography = fs.readFileSync(path.join(__dirname, '../node_modules/@codedgar/puppertino/dist/css/typography.css'), 'utf8')
+  const modals = fs.readFileSync(path.join(__dirname, '../node_modules/@codedgar/puppertino/dist/css/modals.css'), 'utf8')
+  const application = fs.readFileSync(path.join(__dirname, '../src/styles.css'), 'utf8')
+  function rule(source, selector) {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const match = source.match(new RegExp(`(?:^|\\n)${escaped} \\{[^}]+\\}`))
+    assert.ok(match, `missing CSS rule: ${selector}`)
+    return match[0]
+  }
+  const style = document.createElement('style')
+  style.textContent = [
+    rule(typography, '.p-type h2'), rule(typography, '.p-type p'),
+    rule(modals, '.p-desktop-modal__title'), rule(modals, '.p-desktop-modal__description'),
+    rule(application, '.file-delete-dialog'), rule(application, '.file-delete-dialog .p-desktop-modal__actions'),
+  ].join('\n')
+  document.head.append(style)
+  document.body.classList.add('p-type')
+  t.after(() => { style.remove(); document.body.classList.remove('p-type') })
+  await render(t)
+  await openMenu()
+  await activate('Удалить')
+  const modal = document.querySelector('#file-delete-dialog')
+  assert.equal(window.getComputedStyle(modal.querySelector('[role="heading"]')).fontSize, '13px')
+  assert.equal(window.getComputedStyle(modal.querySelector('#delete-description')).fontSize, '11px')
+  assert.equal(window.getComputedStyle(modal).padding, '0px')
+  assert.equal(window.getComputedStyle(modal).margin, '0px')
+  assert.equal(window.getComputedStyle(modal).borderTopWidth, '0px')
+  assert.equal(window.getComputedStyle(modal.querySelector('.p-desktop-modal__actions')).gap, '8px')
 })
 
 test('context menu opens permissions despite a blur before click', async (t) => {
