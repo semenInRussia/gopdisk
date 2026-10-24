@@ -39,36 +39,40 @@ export default function Register() {
   }
 
   return (
-    <main className="auth-card">
-      <header className="auth-header"><h1>Создание аккаунта</h1></header>
+    <main className="auth-card registration-card">
+      <header className="auth-header">
+        <h1>Создание аккаунта</h1>
+        <p>Личное пространство для ваших файлов.</p>
+      </header>
       <StatusMessage error={error} message={message} />
 
       {!message && (
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} aria-busy={requestStatus === 'loading'}>
           <div className="form-grid">
             <div className="form-field">
-              <label className="visually-hidden" htmlFor="name">Имя пользователя</label>
-              <input id="name" name="name" autoComplete="nickname" placeholder="Имя пользователя" required />
+              <label className="form-label" htmlFor="name">Имя пользователя</label>
+              <input className="p-field p-field-touch" id="name" name="name" autoComplete="nickname" aria-invalid={Boolean(error?.fields?.name) || undefined} required />
             </div>
             <div className="form-field">
-              <label className="visually-hidden" htmlFor="register-email">Электронная почта</label>
-              <input id="register-email" name="email" type="email" autoComplete="username" placeholder="Электронная почта" required />
+              <label className="form-label" htmlFor="register-email">Электронная почта</label>
+              <input className="p-field p-field-touch" id="register-email" name="email" type="email" autoComplete="username" autoCapitalize="none" spellCheck={false} placeholder="name@example.com" aria-invalid={Boolean(error?.fields?.email) || undefined} required />
             </div>
             <div className="form-field">
-              <label className="visually-hidden" htmlFor="new-password">Пароль</label>
-              <input id="new-password" name="password" type="password" autoComplete="new-password" minLength={8} maxLength={72} placeholder="Пароль" required ref={passwordRef} onInput={validatePasswords} />
+              <label className="form-label" htmlFor="new-password">Пароль</label>
+              <input className="p-field p-field-touch" id="new-password" name="password" type="password" autoComplete="new-password" minLength={8} maxLength={72} aria-describedby="password-hint" aria-invalid={Boolean(error?.fields?.password) || undefined} required ref={passwordRef} onInput={validatePasswords} />
+              <small className="field-hint" id="password-hint">От 8 до 72 символов</small>
             </div>
             <div className="form-field">
-              <label className="visually-hidden" htmlFor="repeat-password">Повторите пароль</label>
-              <input id="repeat-password" name="repeatPassword" type="password" autoComplete="new-password" minLength={8} maxLength={72} placeholder="Повторите пароль" required ref={repeatPasswordRef} onInput={validatePasswords} />
+              <label className="form-label" htmlFor="repeat-password">Повторите пароль</label>
+              <input className="p-field p-field-touch" id="repeat-password" name="repeatPassword" type="password" autoComplete="new-password" minLength={8} maxLength={72} required ref={repeatPasswordRef} onInput={validatePasswords} />
             </div>
           </div>
 
           <div className="form-divider" aria-hidden="true" />
           <div className="form-actions form-actions--split">
             <Link className="text-link" to="/login">Уже есть аккаунт</Link>
-            <button type="submit" disabled={requestStatus === 'loading'}>
-              {requestStatus === 'loading' ? 'Создаём…' : 'Продолжить'}
+            <button className="p-button p-button-primary p-button-touch-large" type="submit" disabled={requestStatus === 'loading'}>
+              {requestStatus === 'loading' ? 'Создаём…' : 'Создать аккаунт'}
             </button>
           </div>
         </form>
@@ -76,7 +80,7 @@ export default function Register() {
 
       {message && (
         <div className="success-actions">
-          <Link className="primary-link" to="/login">Перейти ко входу</Link>
+          <Link className="p-button p-button-primary p-button-touch-large" to="/login">Перейти ко входу</Link>
         </div>
       )}
     </main>

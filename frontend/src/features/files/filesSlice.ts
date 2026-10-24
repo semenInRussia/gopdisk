@@ -1,8 +1,9 @@
 import { createAsyncThunk, createEntityAdapter, createSlice, type PayloadAction } from '@reduxjs/toolkit'
-import { apiRequest, serializeApiError, type ApiError } from '../../api/client'
+import { apiRequest, apiUploadPart, serializeApiError, type ApiError } from '../../api/client'
 import type { AppDispatch, RootState } from '../../app/store'
 
 export type FileStatus = 'uploading' | 'ready'
+export type FileViewMode = 'list' | 'grid'
 
 export interface StoredFile {
   id: string
@@ -48,6 +49,7 @@ const emptyUpload: UploadState = {
 }
 
 const initialState = filesAdapter.getInitialState({
+  viewMode: 'list' as FileViewMode,
   selectedFileId: null as string | null,
   listStatus: 'idle' as 'idle' | 'loading' | 'succeeded' | 'failed',
   listError: null as ApiError | null,
@@ -112,13 +114,12 @@ export const uploadFile = createAsyncThunk<
         const start = position * partSize
         const part = file.slice(start, Math.min(start + partSize, file.size))
 
-        await apiRequest(`/v1/uploads/${uploadId}/parts/${position}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/octet-stream' },
-          body: part,
-          signal: controller.signal,
+        let sentBytes = 0
+        await apiUploadPart(`/v1/uploads/${uploadId}/parts/${position}`, part, controller.signal, (bytes) => {
+          const delta = Math.max(0, bytes - sentBytes)
+          sentBytes += delta
+          if (delta > 0) dispatch(uploadProgressed(delta))
         }, token)
-        dispatch(uploadProgressed(part.size))
       }
     }
 
@@ -154,6 +155,9 @@ const filesSlice = createSlice({
   name: 'files',
   initialState,
   reducers: {
+    fileViewModeChanged(state, action: PayloadAction<FileViewMode>) {
+      state.viewMode = action.payload
+    },
     filesReceived: filesAdapter.setAll,
     fileUpserted: filesAdapter.upsertOne,
     fileRemoved(state, action: PayloadAction<string>) {
@@ -216,6 +220,7 @@ const filesSlice = createSlice({
 })
 
 export const {
+  fileViewModeChanged,
   fileRemoved,
   fileSelected,
   fileUpserted,

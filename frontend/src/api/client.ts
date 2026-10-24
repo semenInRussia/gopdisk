@@ -62,6 +62,47 @@ export async function apiBlobRequest(
   return response.blob()
 }
 
+export function apiUploadPart(
+  path: string,
+  body: Blob,
+  signal: AbortSignal,
+  onProgress: (bytes: number) => void,
+  token?: string | null,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException('Загрузка отменена.', 'AbortError'))
+      return
+    }
+    const request = new XMLHttpRequest()
+    const abort = () => request.abort()
+    request.open('PUT', path)
+    request.setRequestHeader('Content-Type', 'application/octet-stream')
+    if (token) request.setRequestHeader('Authorization', `Bearer ${token}`)
+    request.upload.onprogress = (event) => onProgress(Math.min(event.loaded, body.size))
+    request.onload = () => {
+      if (request.status >= 200 && request.status < 300) {
+        onProgress(body.size)
+        resolve()
+      } else {
+        let message = 'Не удалось загрузить часть файла.'
+        try {
+          const response = JSON.parse(request.responseText) as { error?: unknown }
+          if (typeof response.error === 'string') message = response.error
+        } catch {
+          // Non-JSON error responses use the default message.
+        }
+        reject(new ApiRequestError(message, request.status))
+      }
+    }
+    request.onerror = () => reject(new Error('Ошибка сети при загрузке файла.'))
+    request.onabort = () => reject(new DOMException('Загрузка отменена.', 'AbortError'))
+    request.onloadend = () => signal.removeEventListener('abort', abort)
+    signal.addEventListener('abort', abort, { once: true })
+    request.send(body)
+  })
+}
+
 export function serializeApiError(error: unknown): ApiError {
   if (error instanceof ApiRequestError) {
     return { message: error.message, status: error.status, fields: error.fields }
