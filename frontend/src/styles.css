@@ -15,11 +15,7 @@ body {
   align-items: center;
   --gd-surface: var(--p-bg-grouped-secondary);
   --gd-divider: var(--p-separator);
-  background:
-    radial-gradient(ellipse at 12% 15%, color-mix(in srgb, var(--p-sys-blue) 24%, transparent), transparent 55%),
-    radial-gradient(ellipse at 88% 80%, color-mix(in srgb, var(--p-sys-purple) 20%, transparent), transparent 55%),
-    var(--p-bg-grouped-primary);
-  background-attachment: fixed;
+  background: var(--p-bg-grouped-primary);
   color: var(--p-text-primary);
   color-scheme: light dark;
   display: flex;
@@ -41,6 +37,7 @@ body {
 }
 
 .auth-card {
+  background: var(--gd-surface);
   border: 1px solid var(--gd-divider);
   border-radius: 20px;
   color: var(--p-text-primary);
@@ -127,12 +124,7 @@ body {
 }
 
 .p-field {
-  --p-field-bg: var(--p-glass-sm);
-  background: var(--p-field-bg);
   border-radius: 12px;
-  box-shadow: var(--p-glass-edge);
-  -webkit-backdrop-filter: saturate(var(--p-material-saturate)) blur(12px);
-  backdrop-filter: saturate(var(--p-material-saturate)) blur(12px);
 }
 
 .p-field:focus-visible {
@@ -232,12 +224,12 @@ body {
 }
 
 .status-message--error {
-  --p-glass-surface: color-mix(in srgb, var(--p-sys-red) 10%, var(--p-glass-md));
+  background: color-mix(in srgb, var(--p-sys-red) 10%, var(--gd-surface));
   border: 1px solid color-mix(in srgb, var(--p-sys-red) 30%, transparent);
 }
 
 .status-message--success {
-  --p-glass-surface: color-mix(in srgb, var(--p-sys-green) 10%, var(--p-glass-md));
+  background: color-mix(in srgb, var(--p-sys-green) 10%, var(--gd-surface));
   border: 1px solid color-mix(in srgb, var(--p-sys-green) 30%, transparent);
 }
 
@@ -307,7 +299,8 @@ body {
   border-radius: 22px;
   color: var(--p-sys-blue);
   border: 1px solid var(--gd-divider);
-  box-shadow: var(--p-glass-edge), var(--p-shadow-overlay);
+  background: var(--gd-surface);
+  box-shadow: var(--p-shadow-overlay);
 }
 
 .compose-button.p-button > svg {
@@ -336,10 +329,12 @@ body {
 }
 
 .account-button[aria-expanded="true"] {
-  box-shadow: 0 0 0 2px var(--p-sys-blue), var(--p-shadow-glass-control);
+  box-shadow: 0 0 0 2px var(--p-sys-blue);
 }
 
 .account-panel {
+  background: var(--gd-surface);
+  box-shadow: var(--p-shadow-overlay);
   border: 1px solid var(--p-separator);
   border-radius: 18px;
   max-height: calc(100dvh - 110px);
@@ -402,6 +397,7 @@ body {
 }
 
 .account-status {
+  background: var(--p-bg-grouped-tertiary);
   align-items: center;
   border-radius: 999px;
   color: var(--p-text-secondary);
@@ -417,7 +413,7 @@ body {
 }
 
 .account-status--active {
-  background: color-mix(in srgb, var(--p-sys-green) 12%, var(--p-glass-sm));
+  background: color-mix(in srgb, var(--p-sys-green) 12%, var(--gd-surface));
   color: var(--p-sys-green);
 }
 
@@ -445,6 +441,7 @@ body {
 }
 
 .page-drop-overlay {
+  background: var(--gd-surface);
   align-items: center;
   color: var(--p-text-primary);
   display: flex;
@@ -502,6 +499,7 @@ body {
 }
 
 .files-toolbar {
+  background: var(--p-bg-grouped-primary);
   align-items: center;
   border: 1px solid var(--gd-divider);
   border-radius: 16px;
@@ -545,6 +543,7 @@ body {
 }
 
 .file-count {
+  background: var(--p-bg-grouped-tertiary);
   border-radius: 8px;
   color: var(--p-text-secondary);
   font-size: 0.75rem;
@@ -596,6 +595,8 @@ body {
 }
 
 .upload-progress {
+  background: var(--gd-surface);
+  box-shadow: var(--p-shadow-overlay);
   border: 1px solid var(--gd-divider);
   border-radius: 16px;
   bottom: 100px;
@@ -674,6 +675,7 @@ body {
 }
 
 .file-open {
+  background: var(--gd-surface);
   appearance: none;
   align-items: center;
   border: 1px solid var(--gd-divider);
@@ -692,14 +694,13 @@ body {
 }
 
 .file-open:hover {
-  --p-glass-surface: color-mix(in srgb, var(--p-sys-blue) 6%, var(--p-glass-md));
+  background: color-mix(in srgb, var(--p-sys-blue) 6%, var(--gd-surface));
 }
 
 .files-list--grid {
-  --p-glass-surface: color-mix(in srgb, var(--p-glass-md) 70%, var(--p-bg-elevated-primary));
+  background: transparent;
   border: 1px solid var(--gd-divider);
   border-radius: 16px;
-  box-shadow: var(--p-glass-edge), var(--p-shadow-glass-control);
   gap: var(--gd-space-2);
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 112px), 1fr));
   padding: var(--gd-space-4);
@@ -747,7 +748,7 @@ body {
 }
 
 .file-open:active {
-  --p-glass-surface: color-mix(in srgb, var(--p-sys-blue) 12%, var(--p-glass-md));
+  background: color-mix(in srgb, var(--p-sys-blue) 12%, var(--gd-surface));
 }
 
 .file-open:focus-visible {
@@ -762,23 +763,23 @@ body {
   height: 44px;
   justify-content: center;
   width: 44px;
-  background: color-mix(in srgb, var(--p-sys-blue) 9%, var(--p-glass-sm));
+  background: color-mix(in srgb, var(--p-sys-blue) 9%, var(--gd-surface));
   border-radius: 12px;
 }
 
 .file-icon--image {
   color: var(--p-sys-purple);
-  background: color-mix(in srgb, var(--p-sys-purple) 9%, var(--p-glass-sm));
+  background: color-mix(in srgb, var(--p-sys-purple) 9%, var(--gd-surface));
 }
 
 .file-icon--video {
   color: var(--p-sys-orange);
-  background: color-mix(in srgb, var(--p-sys-orange) 9%, var(--p-glass-sm));
+  background: color-mix(in srgb, var(--p-sys-orange) 9%, var(--gd-surface));
 }
 
 .file-icon--audio {
   color: var(--p-sys-pink);
-  background: color-mix(in srgb, var(--p-sys-pink) 9%, var(--p-glass-sm));
+  background: color-mix(in srgb, var(--p-sys-pink) 9%, var(--gd-surface));
 }
 
 .file-icon svg {
@@ -892,19 +893,6 @@ body {
   }
 }
 
-@media (prefers-reduced-transparency: reduce) {
-  .p-field,
-  .file-icon,
-  .account-status,
-  .status-message,
-  .account-panel,
-  .page-drop-overlay {
-    background: var(--gd-surface);
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-  }
-}
-
 @media (prefers-contrast: more) {
   body {
     --gd-divider: var(--p-text-secondary);
@@ -921,18 +909,7 @@ body {
   .auth-card,
   .account-panel {
     background: var(--gd-surface);
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
     border-color: var(--p-text-secondary);
-  }
-}
-
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .p-field,
-  .file-icon,
-  .account-status,
-  .status-message {
-    background: var(--gd-surface);
   }
 }
 
@@ -950,12 +927,16 @@ body {
 @media (forced-colors: active) {
   .p-button,
   .p-field,
-  .p-glass,
-  .p-glass-sm {
+  .auth-card,
+  .account-panel,
+  .upload-progress,
+  .files-toolbar,
+  .files-list--grid,
+  .files-empty,
+  .file-open,
+  .status-message {
     background: Canvas;
     color: CanvasText;
     border: 1px solid ButtonText;
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
   }
 }

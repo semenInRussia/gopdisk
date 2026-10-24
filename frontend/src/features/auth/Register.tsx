@@ -39,7 +39,7 @@ export default function Register() {
   }
 
   return (
-    <main className="p-glass auth-card registration-card">
+    <main className="auth-card registration-card">
       <header className="auth-header">
         <h1>Создание аккаунта</h1>
         <p>Личное пространство для ваших файлов.</p>
@@ -71,7 +71,7 @@ export default function Register() {
           <div className="form-divider" aria-hidden="true" />
           <div className="form-actions form-actions--split">
             <Link className="text-link" to="/login">Уже есть аккаунт</Link>
-            <button className="p-button p-button-glass-prominent p-button-touch-large" type="submit" disabled={requestStatus === 'loading'}>
+            <button className="p-button p-button-primary p-button-touch-large" type="submit" disabled={requestStatus === 'loading'}>
               {requestStatus === 'loading' ? 'Создаём…' : 'Создать аккаунт'}
             </button>
           </div>
@@ -80,7 +80,7 @@ export default function Register() {
 
       {message && (
         <div className="success-actions">
-          <Link className="p-button p-button-glass-prominent p-button-touch-large" to="/login">Перейти ко входу</Link>
+          <Link className="p-button p-button-primary p-button-touch-large" to="/login">Перейти ко входу</Link>
         </div>
       )}
     </main>

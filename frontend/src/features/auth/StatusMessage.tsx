@@ -15,7 +15,7 @@ export default function StatusMessage({ error, message }: StatusMessageProps) {
 
   if (error) {
     return (
-      <div className="p-glass status-message status-message--error" role="alert">
+      <div className="status-message status-message--error" role="alert">
         <Icon name="warning" />
         <div>
           <p>{error.message}</p>
@@ -31,5 +31,5 @@ export default function StatusMessage({ error, message }: StatusMessageProps) {
     )
   }
 
-  return <div className="p-glass status-message status-message--success" role="status"><Icon name="check" /><p>{message}</p></div>
+  return <div className="status-message status-message--success" role="status"><Icon name="check" /><p>{message}</p></div>
 }
