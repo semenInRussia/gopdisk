@@ -59,7 +59,7 @@ export default function Profile() {
 
   return (
     <div className="profile-page">
-      <main className="auth-card profile-card">
+      <main className="p-container auth-card profile-card">
         <header className="profile-header">
           <div>
             <p className="eyebrow"><Icon name="box" /> GopherDisk</p>

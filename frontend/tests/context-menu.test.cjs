@@ -89,6 +89,24 @@ async function openMenu() {
   assert.ok(document.querySelector('[role="menu"]'))
 }
 
+test('file action toolbar supports keyboard navigation and skips disabled commands', async (t) => {
+  await render(t, [file, { ...file, id: 'second-file', name: 'second.txt' }])
+  const files = [...document.querySelectorAll('[data-file-id]')]
+  await act(async () => {
+    files[0].click()
+    files[1].dispatchEvent(new window.MouseEvent('click', { bubbles: true, ctrlKey: true }))
+  })
+  const toolbar = document.querySelector('[role="toolbar"]')
+  assert.equal(toolbar.getAttribute('aria-label'), 'Действия с выбранными файлами')
+  const download = toolbar.querySelector('[aria-label="Скачать"]')
+  const remove = toolbar.querySelector('[aria-label="Удалить"]')
+  download.focus()
+  for (const [key, expected] of [['ArrowRight', remove], ['ArrowRight', download], ['End', remove], ['Home', download]]) {
+    await act(async () => document.activeElement.dispatchEvent(new window.KeyboardEvent('keydown', { key, bubbles: true })))
+    assert.equal(document.activeElement, expected)
+  }
+})
+
 async function activate(label, options = {}) {
   const menu = document.querySelector('[role="menu"]')
   const button = [...menu.querySelectorAll('button')].find((element) => element.textContent === label)

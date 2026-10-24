@@ -500,15 +500,12 @@ body {
 }
 
 .files-toolbar {
-  background: var(--p-bg-grouped-primary);
   align-items: center;
-  border: 1px solid var(--gd-divider);
-  border-radius: 16px;
   display: flex;
   flex-wrap: wrap;
   gap: 16px;
   justify-content: space-between;
-  padding: 16px;
+  padding-block: 8px;
 }
 
 .files-heading {
@@ -541,6 +538,26 @@ body {
 .file-view-control .p-segment input:focus-visible + span {
   outline: 3px solid var(--p-sys-blue);
   outline-offset: 3px;
+}
+
+.p-toolbar-btn > svg {
+  height: 18px;
+  width: 18px;
+  flex-shrink: 0;
+}
+
+.file-selection-actions.p-toolbar-group {
+  flex-wrap: nowrap;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.file-selection-actions .p-toolbar-btn {
+  gap: 6px;
+}
+
+.file-toolbar-delete:not(:disabled) {
+  color: var(--p-sys-red);
 }
 
 .file-count {
@@ -1172,12 +1189,18 @@ body {
 
 @media (max-width: 767px) {
   body {
-    padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  }
+
+  body:has(.profile-page) {
+    align-items: flex-start;
+    background: var(--gd-surface);
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
   }
 
   .profile-page {
     margin-bottom: 0;
-    padding-bottom: calc(88px + env(safe-area-inset-bottom));
+    padding-bottom: 0;
   }
 
   .account-menu {
@@ -1186,12 +1209,15 @@ body {
   }
 
   .account-panel {
-    max-height: calc(100dvh - 100px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    max-height: calc(100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
     max-width: calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right));
     padding: 20px;
     position: fixed;
     right: max(16px, env(safe-area-inset-right));
-    top: calc(max(12px, env(safe-area-inset-top)) + 72px);
+    top: auto;
+    bottom: max(16px, env(safe-area-inset-bottom));
+    width: calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right));
+    border-radius: 24px;
   }
 
   .floating-upload {
@@ -1265,17 +1291,21 @@ body {
 
   .files-toolbar-actions {
     gap: 8px;
-    width: 100%;
+    width: auto;
   }
 
   .files-toolbar {
     gap: 12px;
-    padding: 12px;
+    padding: 0;
+  }
+
+  .files-toolbar-actions:has(.file-search--open) {
+    width: 100%;
   }
 
   .files-toolbar-actions:has(.file-search--open) .file-search {
-    flex: 1 0 100%;
-    width: 100%;
+    flex: 1 1 120px;
+    min-width: 0;
   }
 
   .file-view-control {
@@ -1284,8 +1314,20 @@ body {
     max-width: 100%;
   }
 
-  .file-view-control .p-segment > span {
-    padding-inline: 12px;
+  .file-selection-actions.p-toolbar-group {
+    height: 48px;
+    border-radius: 24px;
+    padding-inline: 4px;
+  }
+
+  .file-selection-actions .p-toolbar-btn {
+    min-height: 44px;
+    min-width: 44px;
+    border-radius: 22px;
+  }
+
+  .file-selection-actions .p-toolbar-btn > span {
+    display: none;
   }
 
   .file-touch-open {
@@ -1303,9 +1345,7 @@ body {
   }
 
   .file-selection-toolbar .file-selection-actions {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    width: 100%;
+    margin-inline-start: 0;
   }
 
   .file-selection-actions .p-button {
@@ -1338,6 +1378,10 @@ body {
   .permissions-dialog {
     padding: 20px;
     max-height: calc(100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    inset: auto 0 max(16px, env(safe-area-inset-bottom));
+    margin: 0 auto;
+    width: calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right));
+    border-radius: 24px;
   }
 
   .file-delete-dialog .p-desktop-modal__action {
@@ -1350,7 +1394,11 @@ body {
   }
 
   .profile-card {
-    min-height: 0;
+    --gd-card-padding: var(--p-margin-compact);
+    border: 0;
+    border-radius: 0;
+    min-height: calc(100svh - env(safe-area-inset-top));
+    padding-bottom: calc(104px + env(safe-area-inset-bottom));
   }
 
   .profile-header h1 {
