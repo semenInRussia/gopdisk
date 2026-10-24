@@ -684,6 +684,11 @@ body:has(.file-page-counters[data-visible="true"]) {
   overflow-wrap: anywhere;
 }
 
+.upload-progress > button {
+  margin-top: var(--gd-space-3);
+  min-height: 44px;
+}
+
 .files-placeholder {
   align-items: center;
   color: var(--p-text-secondary);

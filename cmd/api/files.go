@@ -7,6 +7,7 @@ import (
 	"gopherdisk/internal/data"
 	"gopherdisk/internal/validator"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 
@@ -200,8 +201,9 @@ func (app *Application) uploadsGetHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	data := Envelope{"upload": upload}
-	err = app.writeJSON(w, data, http.StatusOK, nil)
+	w.Header().Set("Cache-Control", "no-store")
+	payload := Envelope{"upload": upload}
+	err = app.writeJSON(w, payload, http.StatusOK, nil)
 	if err != nil {
 		app.serverErrorResponse(w, err)
 	}
@@ -302,7 +304,12 @@ func (app *Application) uploadsPartsPutHandler(w http.ResponseWriter, r *http.Re
 	blob, err := app.storage.Files.AddReader(r.Context(), fileID, int(pos), r.Body)
 
 	if err != nil {
+		var networkError net.Error
 		switch {
+		case errors.Is(err, context.Canceled):
+			return
+		case errors.Is(err, context.DeadlineExceeded), errors.As(err, &networkError) && networkError.Timeout():
+			app.errorResponse(w, "timed out receiving upload part", http.StatusRequestTimeout)
 		case errors.Is(err, data.ErrFileNotFound):
 			app.errorResponse(w, err.Error(), http.StatusNotFound)
 		case errors.Is(err, data.ErrInvalidPosition):

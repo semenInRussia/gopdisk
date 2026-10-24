@@ -9,9 +9,29 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 )
+
+// A 16 MiB part can take minutes over a mobile connection. Extend both socket
+// deadlines: WriteTimeout also starts before the request body has been read.
+func (app *Application) uploadPartTimeout(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		const timeout = 10 * time.Minute
+		deadline := time.Now().Add(timeout)
+		controller := http.NewResponseController(w)
+		for _, err := range []error{controller.SetReadDeadline(deadline), controller.SetWriteDeadline(deadline)} {
+			if err != nil && !errors.Is(err, http.ErrNotSupported) {
+				app.serverErrorResponse(w, err)
+				return
+			}
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), timeout)
+		defer cancel()
+		next(w, r.WithContext(ctx))
+	}
+}
 
 func (app *Application) enableCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

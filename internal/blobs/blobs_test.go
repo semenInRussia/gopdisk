@@ -87,6 +87,45 @@ func TestAddOneChunkReader(t *testing.T) {
 	assertNoTemporaryBlobs(t, bs.Path)
 }
 
+func TestListBlobsExcludesActiveUpload(t *testing.T) {
+	bs, err := MakeBlobStorage(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, writer := io.Pipe()
+	result := make(chan error, 1)
+	go func() {
+		_, err := bs.AddReader(context.Background(), reader)
+		result <- err
+	}()
+	defer func() {
+		writer.Close()
+		if err := <-result; err != nil {
+			t.Errorf("upload failed: %v", err)
+		}
+		reader.Close()
+		listed, err := bs.ListBlobs(context.Background())
+		if err != nil || len(listed) != 1 {
+			t.Errorf("completed upload must be listed: blobs=%+v, err=%v", listed, err)
+		}
+	}()
+
+	// The first byte is consumed only after AddReader creates its temporary file.
+	if _, err := writer.Write([]byte("slow upload")); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := bs.ListBlobs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 0 {
+		t.Fatalf("active upload exposed as collectable blobs: %+v", listed)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAddOneChunkReaderReturnsReaderErrors(t *testing.T) {
 	previousMaxSize := BlobsMaxSize
 	BlobsMaxSize = 4

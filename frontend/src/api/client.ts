@@ -62,46 +62,55 @@ export async function apiBlobRequest(
   return response.blob()
 }
 
-export function apiUploadPart(
+
+// Use browser upload events for transfer progress. Server-side persistence is
+// confirmed separately by the uploader, so a missing XHR load event is harmless.
+export function apiUploadBuffer(
   path: string,
-  body: Blob,
+  bytes: ArrayBuffer,
   signal: AbortSignal,
-  onProgress: (bytes: number) => void,
-  token?: string | null,
+  onProgress: (sentBytes: number) => void,
+  token: string | null,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    if (signal.aborted) {
-      reject(new DOMException('Загрузка отменена.', 'AbortError'))
-      return
+    signal.throwIfAborted()
+    const xhr = new XMLHttpRequest()
+    let settled = false
+    const finish = (error?: unknown) => {
+      if (settled) return
+      settled = true
+      signal.removeEventListener('abort', abort)
+      xhr.upload.onprogress = null
+      xhr.onload = xhr.onerror = xhr.onabort = xhr.ontimeout = null
+      if (error !== undefined) reject(error)
+      else resolve()
     }
-    const request = new XMLHttpRequest()
-    const abort = () => request.abort()
-    request.open('PUT', path)
-    request.timeout = 120_000
-    request.setRequestHeader('Content-Type', 'application/octet-stream')
-    if (token) request.setRequestHeader('Authorization', `Bearer ${token}`)
-    request.upload.onprogress = (event) => onProgress(Math.min(event.loaded, body.size))
-    request.onload = () => {
-      if (request.status >= 200 && request.status < 300) {
-        onProgress(body.size)
-        resolve()
-      } else {
-        let message = 'Не удалось загрузить часть файла.'
-        try {
-          const response = JSON.parse(request.responseText) as { error?: unknown }
-          if (typeof response.error === 'string') message = response.error
-        } catch {
-          // Non-JSON error responses use the default message.
-        }
-        reject(new ApiRequestError(message, request.status))
+    const abort = () => {
+      finish(signal.reason ?? new DOMException('Загрузка отменена.', 'AbortError'))
+      xhr.abort()
+    }
+    xhr.open('PUT', path)
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream')
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+    xhr.upload.onprogress = (event) => {
+      if (!signal.aborted && Number.isFinite(event.loaded) && event.loaded >= 0) {
+        onProgress(Math.min(bytes.byteLength, event.loaded))
       }
     }
-    request.onerror = () => reject(new Error('Ошибка сети при загрузке файла.'))
-    request.ontimeout = () => reject(new Error('Сервер не ответил при загрузке части файла.'))
-    request.onabort = () => reject(new DOMException('Загрузка отменена.', 'AbortError'))
-    request.onloadend = () => signal.removeEventListener('abort', abort)
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) { finish(); return }
+      let message = 'Не удалось отправить часть файла.'
+      try {
+        const response = JSON.parse(xhr.responseText) as { error?: unknown }
+        if (typeof response.error === 'string') message = response.error
+      } catch { /* A proxy may return a non-JSON error. */ }
+      finish(new ApiRequestError(message, xhr.status))
+    }
+    xhr.onerror = () => finish(new Error('Ошибка сети при передаче файла.'))
+    xhr.onabort = () => finish(new DOMException('Загрузка отменена.', 'AbortError'))
+    xhr.ontimeout = () => finish(new Error('Превышено время передачи части файла.'))
     signal.addEventListener('abort', abort, { once: true })
-    request.send(body)
+    try { xhr.send(bytes) } catch (error) { finish(error) }
   })
 }
 

@@ -83,11 +83,12 @@ func envIntOrDefault(key string, fallback int) int {
 
 func (app *Application) serve() error {
 	srv := http.Server{
-		Addr:         fmt.Sprintf(":%d", app.cfg.port),
-		Handler:      app.routes(),
-		IdleTimeout:  time.Minute,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		Addr:              fmt.Sprintf(":%d", app.cfg.port),
+		Handler:           app.routes(),
+		IdleTimeout:       time.Minute,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      30 * time.Second,
 	}
 
 	gcCtx, cancelGC := context.WithCancel(context.Background())

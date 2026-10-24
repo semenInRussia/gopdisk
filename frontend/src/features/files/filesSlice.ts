@@ -1,6 +1,7 @@
 import { createAsyncThunk, createEntityAdapter, createSlice, type PayloadAction } from '@reduxjs/toolkit'
-import { apiRequest, apiUploadPart, serializeApiError, type ApiError } from '../../api/client'
+import { apiRequest, serializeApiError, type ApiError } from '../../api/client'
 import type { AppDispatch, RootState } from '../../app/store'
+import { uploadStoredFile, type UploadPhase } from './uploadTransfer'
 
 export type FileStatus = 'uploading' | 'ready'
 export type FileViewMode = 'list' | 'grid'
@@ -18,38 +19,16 @@ interface FilesEnvelope {
   files: StoredFile[]
 }
 
-interface FileEnvelope {
-  file: StoredFile
-}
-
-interface UploadInitializationEnvelope extends FileEnvelope {
-  part_size: number
-}
-
 interface UploadState {
   status: 'idle' | 'uploading' | 'succeeded' | 'failed'
+  phase: UploadPhase
+  currentPart: number
+  totalParts: number
   filename: string | null
   uploadedBytes: number
+  sentBytes: number
   totalBytes: number
   error: ApiError | null
-}
-
-const UPLOAD_CONCURRENCY = 3
-const UPLOAD_PART_ATTEMPTS = 3
-
-function waitForPartRetry(delay: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    signal.throwIfAborted()
-    const abort = () => {
-      clearTimeout(timer)
-      reject(signal.reason)
-    }
-    const timer = setTimeout(() => {
-      signal.removeEventListener('abort', abort)
-      resolve()
-    }, delay)
-    signal.addEventListener('abort', abort, { once: true })
-  })
 }
 
 const filesAdapter = createEntityAdapter<StoredFile>({
@@ -58,8 +37,12 @@ const filesAdapter = createEntityAdapter<StoredFile>({
 
 const emptyUpload: UploadState = {
   status: 'idle',
+  phase: 'initializing',
+  currentPart: 0,
+  totalParts: 0,
   filename: null,
   uploadedBytes: 0,
+  sentBytes: 0,
   totalBytes: 0,
   error: null,
 }
@@ -94,105 +77,16 @@ export const uploadFile = createAsyncThunk<
   { file: File; ownerId: string },
   { state: RootState; dispatch: AppDispatch; rejectValue: ApiError }
 >('files/uploadFile', async ({ file, ownerId }, { dispatch, getState, rejectWithValue, signal }) => {
-  const token = getState().auth.token
-  const controller = new AbortController()
-  const abortUpload = () => controller.abort()
-  signal.addEventListener('abort', abortUpload, { once: true })
-
-  let uploadId: string | null = null
-  let workers: Promise<void>[] = []
-  let partFailure: ApiError | null = null
-
   try {
-    const initialized = await apiRequest<UploadInitializationEnvelope>('/v1/files/upload', {
-      method: 'POST',
-      body: JSON.stringify({
-        owner_id: ownerId,
-        name: file.name,
-        type: file.type || 'application/octet-stream',
-        size: file.size,
-      }),
-      signal: controller.signal,
-    }, token)
-    uploadId = initialized.file.id
-
-    if (!Number.isSafeInteger(initialized.part_size) || initialized.part_size <= 0) {
-      throw new Error('Сервер вернул некорректный размер части файла.')
-    }
-
-    const partSize = initialized.part_size
-    const partCount = Math.ceil(file.size / partSize)
-    let nextPosition = 0
-
-    const uploadWorker = async () => {
-      while (nextPosition < partCount && !controller.signal.aborted) {
-        const position = nextPosition
-        nextPosition += 1
-        const start = position * partSize
-        const part = file.slice(start, Math.min(start + partSize, file.size))
-
-        let sentBytes = 0
-        for (let attempt = 1; attempt <= UPLOAD_PART_ATTEMPTS; attempt += 1) {
-          controller.signal.throwIfAborted()
-          try {
-            await apiUploadPart(`/v1/uploads/${uploadId}/parts/${position}`, part, controller.signal, (bytes) => {
-              if (controller.signal.aborted) return
-              // Each retry starts at byte zero; retain the part's high-water
-              // mark so retransmitted bytes never inflate logical progress.
-              const delta = Math.max(0, bytes - sentBytes)
-              sentBytes += delta
-              if (delta > 0) dispatch(uploadProgressed(delta))
-            }, token)
-            break
-          } catch (error) {
-            if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) throw error
-            const cause = serializeApiError(error)
-            const retryable = cause.status === undefined || cause.status === 0 || cause.status === 408 || cause.status === 429 || (cause.status >= 500 && cause.status <= 599)
-            if (retryable && attempt < UPLOAD_PART_ATTEMPTS) {
-              await waitForPartRetry(300 * 2 ** (attempt - 1), controller.signal)
-              continue
-            }
-            partFailure = {
-              ...cause,
-              message: `Не удалось загрузить часть ${position + 1} из ${partCount}${attempt > 1 ? ` за ${attempt} попытки` : ''}. ${cause.message}`,
-            }
-            // Record the original error before aborting siblings, whose abort
-            // rejections may otherwise win the Promise.all race.
-            controller.abort()
-            throw error
-          }
-        }
-      }
-    }
-
-    workers = Array.from(
-      { length: Math.min(UPLOAD_CONCURRENCY, partCount) },
-      () => uploadWorker(),
-    )
-    await Promise.all(workers)
-    controller.signal.throwIfAborted()
-
-    const completed = await apiRequest<FileEnvelope>(`/v1/uploads/${uploadId}/complete`, {
-      method: 'POST',
-      signal: controller.signal,
-    }, token)
-    return completed.file
+    return await uploadStoredFile({
+      file, ownerId, token: getState().auth.token, signal,
+      onPhase: (phase) => { if (!signal.aborted) dispatch(uploadPhaseChanged(phase)) },
+      onPart: (currentPart, totalParts) => { if (!signal.aborted) dispatch(uploadPartChanged({ currentPart, totalParts })) },
+      onProgress: (bytes) => { if (!signal.aborted) dispatch(uploadConfirmed(bytes)) },
+      onTransferProgress: (bytes) => { if (!signal.aborted) dispatch(uploadSent(bytes)) },
+    })
   } catch (error) {
-    controller.abort()
-    await Promise.allSettled(workers)
-    const uploadError = partFailure ?? serializeApiError(error)
-
-    if (uploadId) {
-      try {
-        await apiRequest(`/v1/uploads/${uploadId}`, { method: 'DELETE', signal: AbortSignal.timeout(10_000) }, token)
-        uploadError.message += ' Загрузка файла отменена.'
-      } catch (cleanupError) {
-        uploadError.message += ` Загрузка остановлена, но не удалось подтвердить отмену на сервере: ${serializeApiError(cleanupError).message}`
-      }
-    }
-    return rejectWithValue(uploadError)
-  } finally {
-    signal.removeEventListener('abort', abortUpload)
+    return rejectWithValue(serializeApiError(error))
   }
 })
 
@@ -219,11 +113,19 @@ const filesSlice = createSlice({
       state.listError = null
       state.upload = { ...emptyUpload }
     },
-    uploadProgressed(state, action: PayloadAction<number>) {
-      state.upload.uploadedBytes = Math.min(
-        state.upload.uploadedBytes + action.payload,
-        state.upload.totalBytes,
-      )
+    uploadConfirmed(state, action: PayloadAction<number>) {
+      state.upload.uploadedBytes = Math.min(Math.max(state.upload.uploadedBytes, action.payload), state.upload.totalBytes)
+      state.upload.sentBytes = Math.max(state.upload.sentBytes, state.upload.uploadedBytes)
+    },
+    uploadSent(state, action: PayloadAction<number>) {
+      state.upload.sentBytes = Math.min(Math.max(state.upload.sentBytes, action.payload), state.upload.totalBytes)
+    },
+    uploadPartChanged(state, action: PayloadAction<{ currentPart: number; totalParts: number }>) {
+      state.upload.currentPart = action.payload.currentPart
+      state.upload.totalParts = action.payload.totalParts
+    },
+    uploadPhaseChanged(state, action: PayloadAction<UploadState['phase']>) {
+      state.upload.phase = action.payload
     },
     uploadFeedbackCleared(state) {
       if (state.upload.status !== 'uploading') state.upload = { ...emptyUpload }
@@ -246,8 +148,12 @@ const filesSlice = createSlice({
       .addCase(uploadFile.pending, (state, action) => {
         state.upload = {
           status: 'uploading',
+          phase: 'initializing',
+          currentPart: 0,
+          totalParts: 0,
           filename: action.meta.arg.file.name,
           uploadedBytes: 0,
+          sentBytes: 0,
           totalBytes: action.meta.arg.file.size,
           error: null,
         }
@@ -256,6 +162,7 @@ const filesSlice = createSlice({
         filesAdapter.upsertOne(state, action.payload)
         state.upload.status = 'succeeded'
         state.upload.uploadedBytes = state.upload.totalBytes
+        state.upload.sentBytes = state.upload.totalBytes
       })
       .addCase(uploadFile.rejected, (state, action) => {
         state.upload.status = 'failed'
@@ -272,7 +179,10 @@ export const {
   filesCleared,
   filesReceived,
   uploadFeedbackCleared,
-  uploadProgressed,
+  uploadConfirmed,
+  uploadSent,
+  uploadPartChanged,
+  uploadPhaseChanged,
 } = filesSlice.actions
 
 const fileSelectors = filesAdapter.getSelectors((state: RootState) => state.files)

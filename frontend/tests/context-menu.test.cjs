@@ -34,6 +34,7 @@ const { act } = React
 const { createRoot } = require('react-dom/client')
 const { Provider } = require('react-redux')
 const { default: FileBrowser } = require('../src/features/files/FileBrowser.tsx')
+const { default: FileUpload } = require('../src/features/files/FileUpload.tsx')
 const { default: filesReducer, filesReceived } = require('../src/features/files/filesSlice.ts')
 const { default: usersReducer, currentUserSet } = require('../src/features/users/usersSlice.ts')
 const { default: permissionsReducer } = require('../src/features/permissions/permissionsSlice.ts')
@@ -41,6 +42,47 @@ const actions = require('../src/features/files/fileActions.ts')
 const permissionsApi = require('../src/features/permissions/permissionsApi.ts')
 
 const file = { id: 'file-id', owner_id: 'owner-id', name: 'document.txt', type: 'text/plain', size: 5, status: 'ready' }
+
+test('upload shows intermediate percentages, caps at 99 and cancels the active file and queue', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const requests = require('./helpers/upload-xhr.cjs')(t)
+  let cancelled = false, putSignal
+  t.mock.method(globalThis, 'fetch', async (path, options) => {
+    if (path === '/v1/files/upload') return Response.json({ file: { ...file, status: 'uploading', size: 8 }, part_size: 16 })
+    if (path.includes('/parts/')) { putSignal = options.signal; return new Promise(() => {}) }
+    assert.equal(path, '/v1/uploads/file-id')
+    if (options.method === 'DELETE') { cancelled = true; return new Response(null, { status: 204 }) }
+    return Response.json({ upload: { file_id: 'file-id', size: 8, parts: [] } })
+  })
+  const host = document.createElement('div')
+  document.body.append(host)
+  const root = createRoot(host)
+  const initial = filesReducer(undefined, { type: 'init' })
+  const store = configureStore({ reducer: { files: filesReducer, users: usersReducer, permissions: permissionsReducer, auth: () => ({ token: 'token' }) },
+    preloadedState: { files: { ...initial, listStatus: 'succeeded' } },
+  })
+  t.after(async () => { await act(async () => root.unmount()); host.remove() })
+  await act(async () => root.render(React.createElement(Provider, { store }, React.createElement(FileUpload, { ownerId: 'owner' }))))
+  const input = document.querySelector('input[type="file"]')
+  Object.defineProperty(input, 'files', { configurable: true, value: [new File(['abcdefgh'], 'mobile.zip'), new File(['waiting'], 'waiting.zip')] })
+  await act(async () => {
+    input.dispatchEvent(new window.Event('change', { bubbles: true }))
+    await new Promise(setImmediate)
+  })
+  await act(async () => { requests[0].upload.onprogress({ loaded: 2 }) })
+  assert.match(document.querySelector('.upload-progress strong').textContent, /25%/)
+  assert.equal(store.getState().files.upload.uploadedBytes, 0)
+  await act(async () => { requests[0].upload.onprogress({ loaded: 8 }) })
+  assert.match(document.querySelector('.upload-progress strong').textContent, /99%/)
+  await act(async () => {
+    document.querySelector('.upload-progress button').click()
+    await new Promise(setImmediate)
+  })
+  assert.equal(document.querySelector('.upload-progress'), null)
+  assert.match(document.querySelector('.upload-summary').textContent, /Отменено: 2/)
+  assert.equal(putSignal.aborted, true)
+  assert.equal(cancelled, true)
+})
 
 async function render(t, files = [file]) {
   const host = document.createElement('div')

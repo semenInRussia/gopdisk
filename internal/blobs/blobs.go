@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 var BlobsMaxSize int64 = 16 * 1024 * 1024 // 16MB
@@ -114,6 +115,11 @@ func (bs *BlobStorage) ListBlobs(ctx context.Context) ([]Blob, error) {
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			return nil, err
+		}
+		// AddReader owns these files until they are renamed to their hash.
+		// Exposing them to garbage collection can unlink an active upload.
+		if strings.HasPrefix(entry.Name(), ".blob-") {
+			continue
 		}
 		if !entry.Type().IsRegular() {
 			continue

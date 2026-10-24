@@ -995,6 +995,9 @@ func TestFilesUploadGetEndpoint(t *testing.T) {
 		response := decodeResponse[struct {
 			Upload data.Upload `json:"upload"`
 		}](t, recorder)
+		if recorder.Header().Get("Cache-Control") != "no-store" {
+			t.Fatal("progress response must not be cached")
+		}
 		if response.Upload.FileID != data.FileID(fileID) {
 			t.Errorf("got file ID %q, expected %q", response.Upload.FileID, fileID)
 		}

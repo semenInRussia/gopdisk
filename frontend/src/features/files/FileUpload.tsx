@@ -78,7 +78,7 @@ export default function FileUpload({ ownerId }: FileUploadProps) {
 
   const progress = upload.totalBytes === 0
     ? upload.status === 'succeeded' ? 100 : 0
-    : Math.round((upload.uploadedBytes / upload.totalBytes) * 100)
+    : Math.min(upload.status === 'succeeded' ? 100 : 99, Math.floor((upload.sentBytes / upload.totalBytes) * 100))
 
   return (
     <>
@@ -123,15 +123,21 @@ export default function FileUpload({ ownerId }: FileUploadProps) {
             Загружено: {queue.completed} из {queue.total}
             {queue.pending > 0 && ` · Осталось: ${queue.pending}`}
             {queue.failed > 0 && ` · Ошибок: ${queue.failed}`}
+            {queue.cancelled > 0 && ` · Отменено: ${queue.cancelled}`}
           </p>
         )}
 
         {uploading && createPortal(
           <aside className="upload-progress" role="status" aria-live="polite" aria-label="Загрузка файлов">
-            <strong>Загрузка файлов · {progress}%</strong>
+            <strong>{upload.phase === 'finalizing' ? 'Завершаем загрузку' : upload.phase === 'reading' ? 'Подготавливаем файл' : 'Загрузка файлов'} · {progress}%</strong>
             <progress className="p-progress" max={100} value={progress} aria-label={`Загрузка ${upload.filename ?? 'файла'}`} />
-            <p>{upload.filename}: {formatBytes(upload.uploadedBytes)} из {formatBytes(upload.totalBytes)}</p>
-            <p>{progress === 100 ? 'Сохраняем файл… · ' : ''}Загружено: {queue.completed} из {queue.total}{queue.failed > 0 && ` · Ошибок: ${queue.failed}`}</p>
+            <p>{upload.filename}: сохранено {formatBytes(upload.uploadedBytes)} из {formatBytes(upload.totalBytes)}</p>
+            {upload.sentBytes > upload.uploadedBytes && <p>Отправлено: {formatBytes(upload.sentBytes)} из {formatBytes(upload.totalBytes)}</p>}
+            {upload.phase !== 'finalizing' && upload.totalParts > 0 && <p>Часть {upload.currentPart} из {upload.totalParts}</p>}
+            <p>{upload.phase === 'finalizing' ? 'Подтверждаем сохранение… · ' : ''}Загружено: {queue.completed} из {queue.total}{queue.failed > 0 && ` · Ошибок: ${queue.failed}`}</p>
+            <button className="p-button p-button-secondary" type="button" onClick={() => queueRef.current?.cancel()}>
+              Отменить загрузку
+            </button>
           </aside>,
           document.body,
         )}
