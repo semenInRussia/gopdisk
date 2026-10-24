@@ -537,6 +537,7 @@ test('aborts an in-flight chunk request and reports cancellation', async (t) => 
 
 test('cancels a failed upload and keeps it out of the file list', async (t) => {
   let cancelled = false
+  const attempts = new Map()
   t.mock.method(globalThis, 'fetch', async (path, options) => {
     if (path === '/v1/files/upload') return json({ file: storedFile, part_size: 3 })
     if (options.method === 'DELETE') {
@@ -544,6 +545,7 @@ test('cancels a failed upload and keeps it out of the file list', async (t) => {
       return new Response(null, { status: 204 })
     }
     assert.match(path, /\/parts\//)
+    attempts.set(path, (attempts.get(path) ?? 0) + 1)
     return json({ error: 'Disk full' }, 500)
   })
   const store = makeStore()
@@ -551,7 +553,162 @@ test('cancels a failed upload and keeps it out of the file list', async (t) => {
   assert.ok(uploadFile.rejected.match(result))
   assert.ok(cancelled)
   assert.deepEqual(store.getState().files.ids, [])
-  assert.equal(store.getState().files.upload.error.message, 'Disk full')
+  assert.match(store.getState().files.upload.error.message, /Не удалось загрузить часть \d из 2 за 3 попытки\. Disk full.*Загрузка файла отменена/)
+  assert.ok([...attempts.values()].every((count) => count <= 3))
+})
+
+async function advancePartRetries(t) {
+  await new Promise(setImmediate)
+  t.mock.timers.tick(300)
+  await new Promise(setImmediate)
+  t.mock.timers.tick(600)
+  await new Promise(setImmediate)
+}
+
+test('retries a transient part failure twice with the same bytes and position before completing', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let attempts = 0
+  let completed = false
+  t.mock.method(globalThis, 'fetch', async (path, options) => {
+    assert.equal(options.headers.get('Authorization'), 'Bearer test-token')
+    if (path === '/v1/files/upload') return json({ file: storedFile, part_size: 10 })
+    if (path.endsWith('/parts/0')) {
+      assert.equal(await options.body.text(), '0123456789')
+      attempts += 1
+      if (attempts === 1) throw new TypeError('Network unavailable')
+      if (attempts === 2) return json({ error: 'Busy' }, 503)
+      return new Response(null, { status: 204 })
+    }
+    assert.equal(path, '/v1/uploads/file-id/complete')
+    completed = true
+    return json({ file: storedFile })
+  })
+  const store = makeStore()
+  const pending = store.dispatch(uploadFile({ file: new File(['0123456789'], 'sample.txt'), ownerId: 'owner' }))
+  await advancePartRetries(t)
+  assert.ok(uploadFile.fulfilled.match(await pending))
+  assert.equal(attempts, 3)
+  assert.equal(completed, true)
+  assert.equal(store.getState().files.upload.uploadedBytes, 10)
+})
+
+test('retry progress never counts retransmitted bytes, including after a timeout', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const requests = []
+  t.mock.method(XMLHttpRequest.prototype, 'send', function (body) { this.body = body; requests.push(this) })
+  t.mock.method(globalThis, 'fetch', async (path) => json(path === '/v1/files/upload'
+    ? { file: storedFile, part_size: 10 } : { file: storedFile }))
+  const store = makeStore()
+  const progress = []
+  store.subscribe(() => progress.push(store.getState().files.upload.uploadedBytes))
+  const pending = store.dispatch(uploadFile({ file: new File(['0123456789'], 'sample.txt'), ownerId: 'owner' }))
+  await new Promise(setImmediate)
+  assert.equal(requests[0].timeout, 120_000)
+  requests[0].upload.onprogress({ loaded: 7 })
+  requests[0].status = 503
+  requests[0].responseText = '{"error":"Busy"}'
+  requests[0].onload()
+  requests[0].onloadend()
+  await new Promise(setImmediate)
+  t.mock.timers.tick(300)
+  await new Promise(setImmediate)
+  requests[1].upload.onprogress({ loaded: 3 })
+  assert.equal(store.getState().files.upload.uploadedBytes, 7)
+  requests[1].upload.onprogress({ loaded: 8 })
+  requests[1].ontimeout()
+  requests[1].onloadend()
+  await new Promise(setImmediate)
+  t.mock.timers.tick(600)
+  await new Promise(setImmediate)
+  requests[2].upload.onprogress({ loaded: 2 })
+  assert.equal(store.getState().files.upload.uploadedBytes, 8)
+  requests[2].status = 204
+  requests[2].onload()
+  requests[2].onloadend()
+  assert.ok(uploadFile.fulfilled.match(await pending))
+  assert.equal(requests.length, 3)
+  assert.ok(progress.every((bytes, index) => bytes <= 10 && (index === 0 || bytes >= progress[index - 1])))
+  assert.equal(store.getState().files.upload.uploadedBytes, 10)
+})
+
+test('exhausting retries aborts sibling parts, skips unsent parts and completion, and cancels the API session', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const positions = []
+  let aborted = 0
+  let cancelled = 0
+  t.mock.method(XMLHttpRequest.prototype, 'send', function () {
+    const position = Number(this.path.split('/').at(-1))
+    positions.push(position)
+    if (position === 0) queueMicrotask(() => {
+      this.status = 503
+      this.responseText = '{"error":"Disk unavailable"}'
+      this.onload()
+      this.onloadend()
+    })
+  })
+  t.mock.method(XMLHttpRequest.prototype, 'abort', function () {
+    aborted += 1
+    this.onabort()
+    this.onloadend()
+  })
+  t.mock.method(globalThis, 'fetch', async (path, options) => {
+    if (path === '/v1/files/upload') return json({ file: storedFile, part_size: 1 })
+    assert.equal(path, '/v1/uploads/file-id')
+    assert.equal(options.method, 'DELETE')
+    assert.equal(options.signal.aborted, false, 'cleanup uses its own signal')
+    cancelled += 1
+    return new Response(null, { status: 204 })
+  })
+  const store = makeStore()
+  const pending = store.dispatch(uploadFile({ file: new File(['0123456789'], 'sample.txt'), ownerId: 'owner' }))
+  await advancePartRetries(t)
+  const result = await pending
+  assert.ok(uploadFile.rejected.match(result))
+  assert.deepEqual(positions, [0, 1, 2, 0, 0])
+  assert.equal(aborted, 2)
+  assert.equal(cancelled, 1)
+  assert.deepEqual(store.getState().files.ids, [])
+  assert.match(result.payload.message, /часть 1 из 10 за 3 попытки.*Disk unavailable.*Загрузка файла отменена/)
+})
+
+test('aborting during retry backoff cancels the timer without another part request', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let attempts = 0
+  let cancelled = 0
+  t.mock.method(globalThis, 'fetch', async (path, options) => {
+    if (path === '/v1/files/upload') return json({ file: storedFile, part_size: 10 })
+    if (options.method === 'DELETE') { cancelled += 1; return new Response(null, { status: 204 }) }
+    assert.match(path, /\/parts\/0$/)
+    attempts += 1
+    return json({ error: 'Busy' }, 503)
+  })
+  const pending = makeStore().dispatch(uploadFile({ file: new File(['data'], 'sample.txt'), ownerId: 'owner' }))
+  await new Promise(setImmediate)
+  pending.abort()
+  assert.ok(uploadFile.rejected.match(await pending))
+  await new Promise(setImmediate)
+  t.mock.timers.tick(10_000)
+  await new Promise(setImmediate)
+  assert.equal(attempts, 1)
+  assert.equal(cancelled, 1)
+})
+
+test('permanent part errors do not retry and a failed cancellation is reported alongside the original error', async (t) => {
+  let attempts = 0
+  t.mock.method(globalThis, 'fetch', async (path, options) => {
+    if (path === '/v1/files/upload') return json({ file: storedFile, part_size: 10 })
+    if (options.method === 'DELETE') return json({ error: 'Cleanup unavailable' }, 503)
+    assert.match(path, /\/parts\/0$/)
+    attempts += 1
+    return json({ error: 'Access denied' }, 403)
+  })
+  const store = makeStore()
+  const result = await store.dispatch(uploadFile({ file: new File(['data'], 'sample.txt'), ownerId: 'owner' }))
+  assert.ok(uploadFile.rejected.match(result))
+  assert.equal(attempts, 1)
+  assert.equal(result.payload.status, 403)
+  assert.match(result.payload.message, /Access denied.*не удалось подтвердить отмену на сервере: Cleanup unavailable/)
+  assert.deepEqual(store.getState().files.ids, [])
 })
 
 test('loads the existing file list with authentication', async (t) => {

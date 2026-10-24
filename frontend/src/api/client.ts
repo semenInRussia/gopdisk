@@ -77,6 +77,7 @@ export function apiUploadPart(
     const request = new XMLHttpRequest()
     const abort = () => request.abort()
     request.open('PUT', path)
+    request.timeout = 120_000
     request.setRequestHeader('Content-Type', 'application/octet-stream')
     if (token) request.setRequestHeader('Authorization', `Bearer ${token}`)
     request.upload.onprogress = (event) => onProgress(Math.min(event.loaded, body.size))
@@ -96,6 +97,7 @@ export function apiUploadPart(
       }
     }
     request.onerror = () => reject(new Error('Ошибка сети при загрузке файла.'))
+    request.ontimeout = () => reject(new Error('Сервер не ответил при загрузке части файла.'))
     request.onabort = () => reject(new DOMException('Загрузка отменена.', 'AbortError'))
     request.onloadend = () => signal.removeEventListener('abort', abort)
     signal.addEventListener('abort', abort, { once: true })

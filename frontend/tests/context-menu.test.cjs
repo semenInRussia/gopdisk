@@ -89,6 +89,131 @@ async function openMenu() {
   assert.ok(document.querySelector('[role="menu"]'))
 }
 
+function touchEvent(type, options = {}) {
+  const event = new window.Event(type, { bubbles: true, cancelable: true })
+  Object.assign(event, { pointerType: 'touch', pointerId: 1, isPrimary: true, clientX: 60, clientY: 80 }, options)
+  return event
+}
+
+function holdClock(t) {
+  const pending = new Map()
+  let nextId = 0
+  t.mock.method(window, 'setTimeout', (callback, delay) => {
+    assert.equal(delay, 500)
+    pending.set(++nextId, callback)
+    return nextId
+  })
+  t.mock.method(window, 'clearTimeout', (id) => pending.delete(id))
+  return {
+    pending,
+    async finish() {
+      await act(async () => {
+        for (const [id, callback] of pending) { pending.delete(id); callback() }
+      })
+    },
+  }
+}
+
+test('holding a file opens its menu and releasing does not toggle the selection', async (t) => {
+  await render(t)
+  const clock = holdClock(t)
+  const button = document.querySelector('[data-file-id]')
+  await act(async () => button.dispatchEvent(touchEvent('pointerdown')))
+  assert.equal(document.querySelector('[role="menu"]'), null)
+  assert.equal(clock.pending.size, 1)
+  await clock.finish()
+  assert.ok(document.querySelector('[role="menu"]'))
+  assert.equal(button.getAttribute('aria-pressed'), 'true')
+  await act(async () => {
+    button.dispatchEvent(touchEvent('pointerup'))
+    button.click()
+  })
+  assert.ok(document.querySelector('[role="menu"]'))
+  assert.equal(button.getAttribute('aria-pressed'), 'true')
+  await act(async () => button.dispatchEvent(touchEvent('pointerdown')))
+  await act(async () => { button.dispatchEvent(touchEvent('pointerup')); button.click() })
+  assert.equal(button.getAttribute('aria-pressed'), 'false', 'a subsequent normal tap still toggles')
+})
+
+test('holding the filename opens a touch menu anchored inside a narrow viewport', async (t) => {
+  await render(t)
+  const clock = holdClock(t)
+  t.mock.method(window.HTMLElement.prototype, 'getBoundingClientRect', function () {
+    if (this.classList.contains('file-open')) return { left: 250, right: 314, top: 560, bottom: 672, width: 64, height: 112 }
+    return { left: 0, right: 250, top: 0, bottom: 180, width: 250, height: 180 }
+  })
+  const viewportWidth = window.innerWidth
+  const viewportHeight = window.innerHeight
+  window.innerWidth = 320
+  window.innerHeight = 700
+  t.after(() => { window.innerWidth = viewportWidth; window.innerHeight = viewportHeight })
+  const filename = document.querySelector('.files-list .file-details strong')
+  assert.ok(filename.closest('button[data-file-id]'), 'the filename belongs to the same touch target as its icon')
+  await act(async () => filename.dispatchEvent(touchEvent('pointerdown')))
+  await clock.finish()
+  const menu = document.querySelector('[role="menu"]')
+  assert.ok(menu.classList.contains('p-menu-touch'))
+  assert.ok(menu.classList.contains('p-menu-touch--context'))
+  assert.equal(menu.style.left, '62px')
+  assert.equal(menu.style.top, '364px')
+})
+
+test('lifting the held finger cannot accidentally activate a menu command', async (t) => {
+  const download = t.mock.method(actions, 'downloadStoredFiles', async () => {})
+  await render(t)
+  const clock = holdClock(t)
+  const fileButton = document.querySelector('[data-file-id]')
+  await act(async () => fileButton.dispatchEvent(touchEvent('pointerdown')))
+  await clock.finish()
+  const command = document.querySelector('[role="menu"] button')
+  await act(async () => {
+    fileButton.dispatchEvent(touchEvent('pointerup'))
+    command.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }))
+  })
+  assert.equal(download.mock.callCount(), 0)
+  assert.ok(document.querySelector('[role="menu"]'))
+  await act(async () => {
+    command.dispatchEvent(touchEvent('pointerdown'))
+    command.dispatchEvent(touchEvent('pointerup'))
+    command.dispatchEvent(new window.MouseEvent('click', { bubbles: true, detail: 1 }))
+  })
+  assert.equal(download.mock.callCount(), 1)
+})
+
+test('release, movement, cancellation, scrolling, blur and a second finger cancel a pending hold', async (t) => {
+  await render(t)
+  const clock = holdClock(t)
+  const button = document.querySelector('[data-file-id]')
+  for (const [target, event] of [
+    [button, touchEvent('pointerup')],
+    [button, touchEvent('pointermove', { clientX: 90 })],
+    [button, touchEvent('pointercancel')],
+    [button, touchEvent('lostpointercapture')],
+    [window, new window.Event('scroll')],
+    [window, new window.Event('blur')],
+    [window, touchEvent('pointerdown', { pointerId: 2, isPrimary: false })],
+  ]) {
+    await act(async () => button.dispatchEvent(touchEvent('pointerdown')))
+    assert.equal(clock.pending.size, 1)
+    await act(async () => target.dispatchEvent(event))
+    assert.equal(clock.pending.size, 0, event.type)
+    await clock.finish()
+    assert.equal(document.querySelector('[role="menu"]'), null, event.type)
+  }
+})
+
+test('native touch contextmenu cancels the hold timer and suppresses the following click', async (t) => {
+  await render(t)
+  const clock = holdClock(t)
+  const button = document.querySelector('[data-file-id]')
+  await act(async () => button.dispatchEvent(touchEvent('pointerdown')))
+  await openMenu()
+  assert.equal(clock.pending.size, 0)
+  await act(async () => button.click())
+  assert.equal(button.getAttribute('aria-pressed'), 'true')
+  assert.ok(document.querySelector('[role="menu"]'))
+})
+
 test('file action toolbar supports keyboard navigation and skips disabled commands', async (t) => {
   await render(t, [file, { ...file, id: 'second-file', name: 'second.txt' }])
   const files = [...document.querySelectorAll('[data-file-id]')]
@@ -105,6 +230,60 @@ test('file action toolbar supports keyboard navigation and skips disabled comman
     await act(async () => document.activeElement.dispatchEvent(new window.KeyboardEvent('keydown', { key, bubbles: true })))
     assert.equal(document.activeElement, expected)
   }
+})
+
+test('sticky toolbar preserves search and shows selected and total counters in a separate page footer', async (t) => {
+  const { default: FileUpload } = require('../src/features/files/FileUpload.tsx')
+  const { loadFiles } = require('../src/features/files/filesSlice.ts')
+  const originalObserver = globalThis.IntersectionObserver
+  let intersection
+  globalThis.IntersectionObserver = class {
+    constructor(callback) { intersection = callback }
+    observe() {}
+    disconnect() {}
+  }
+  t.after(() => { globalThis.IntersectionObserver = originalObserver })
+  const store = configureStore({ reducer: {
+    files: filesReducer, users: usersReducer, permissions: permissionsReducer,
+    auth: () => ({ token: 'token' }),
+  } })
+  store.dispatch(loadFiles.fulfilled([file, { ...file, id: 'second-file', name: 'second.txt' }], 'loaded', file.owner_id))
+  const host = document.createElement('div')
+  document.body.append(host)
+  const root = createRoot(host)
+  t.after(async () => { await act(async () => root.unmount()); host.remove() })
+  await act(async () => root.render(React.createElement(Provider, { store }, React.createElement(FileUpload, { ownerId: file.owner_id }))))
+  const toolbar = document.querySelector('.file-selection-toolbar')
+  const count = document.querySelector('.file-page-counters')
+  assert.equal(count.getAttribute('aria-hidden'), 'true')
+  assert.equal(count.hasAttribute('inert'), true)
+  assert.equal(toolbar.querySelector('[aria-label="Вид файлов"]') !== null, true)
+  await act(async () => toolbar.querySelector('input[value="grid"]').click())
+  assert.equal(store.getState().files.viewMode, 'grid')
+  await act(async () => toolbar.querySelector('[aria-label="Открыть поиск файлов"]').click())
+  const input = toolbar.querySelector('input[type="search"]')
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(input, 'no-match')
+    input.dispatchEvent(new window.Event('input', { bubbles: true }))
+  })
+  assert.equal(document.activeElement === input, true, 'filtering to zero results preserves search focus')
+  assert.equal(document.querySelectorAll('[data-file-id]').length, 0)
+  assert.equal(input.isConnected, true)
+  await act(async () => intersection([{ isIntersecting: false, boundingClientRect: { top: -1 } }]))
+  assert.equal(toolbar.classList.contains('file-selection-toolbar--stuck'), true)
+  assert.equal(count.getAttribute('aria-hidden'), 'false')
+  assert.equal(count.dataset.visible, 'true')
+  assert.deepEqual([...count.querySelectorAll('span')].map((span) => span.textContent), ['Выбрано: 0', 'Всего файлов: 2'])
+  assert.equal(toolbar.contains(count), false)
+  assert.equal(count.parentElement === document.body, true)
+  await act(async () => toolbar.querySelector('[aria-label="Закрыть поиск"]').click())
+  assert.equal(document.querySelectorAll('[data-file-id]').length, 2)
+  await act(async () => document.querySelector('[data-file-id]').click())
+  assert.deepEqual([...count.querySelectorAll('span')].map((span) => span.textContent), ['Выбрано: 1', 'Всего файлов: 2'])
+  await act(async () => intersection([{ isIntersecting: true, boundingClientRect: { top: 1 } }]))
+  assert.equal(count.getAttribute('aria-hidden'), 'true')
+  assert.equal(count.dataset.visible, 'false')
+  assert.equal(count.isConnected, true, 'panel stays mounted so its exit transition can finish')
 })
 
 async function activate(label, options = {}) {
@@ -282,8 +461,155 @@ test('context menu opens permissions despite a blur before click', async (t) => 
   await openMenu()
   await activate('Права доступа')
   assert.ok(document.querySelector('dialog[open]'))
-  assert.equal(document.querySelector('dialog h2').textContent, 'Права доступа')
+  assert.equal(document.querySelector('dialog h2').textContent, file.name)
   assert.equal(load.mock.callCount(), 1)
+})
+
+async function permissionsWindow(t, permissions = []) {
+  t.mock.method(actions, 'copyStoredFilePath', async () => {})
+  t.mock.method(permissionsApi, 'loadFilePermissions', async () => permissions)
+  const store = await render(t)
+  await openMenu()
+  await activate('Права доступа')
+  return store
+}
+
+async function enterPermissionUser(value) {
+  const input = document.querySelector('#permissions-user')
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(input, value)
+    input.dispatchEvent(new window.Event('input', { bubbles: true }))
+  })
+}
+
+test('permissions opens with an owner summary and adds a user with read access by default', async (t) => {
+  const save = t.mock.method(permissionsApi, 'saveFilePermissions', async () => {})
+  const store = await permissionsWindow(t)
+  assert.equal(document.querySelector('#permissions-editor-form'), null)
+  assert.match(document.querySelector('.permissions-owner').textContent, /Owner \(вы\).*Полный доступ/)
+  assert.equal(document.querySelector('.permissions-owner button'), null)
+  const add = document.querySelector('[aria-controls="permissions-editor-form"]')
+  await act(async () => add.click())
+  assert.equal(document.activeElement, document.querySelector('#permissions-user'))
+  const id = 'aabbccdd-1111-2222-3333-444455556666'
+  await enterPermissionUser(id)
+  const boxes = [...document.querySelectorAll('.permissions-choices input')]
+  assert.deepEqual(boxes.map((box) => box.checked), [true, false, false])
+  await act(async () => document.querySelector('#permissions-editor-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })))
+  assert.deepEqual(save.mock.calls[0].arguments, [file.id, id, ['files:read'], 'token'])
+  assert.equal(document.querySelector('#permissions-editor-form'), null)
+  assert.equal(document.activeElement, add)
+  assert.equal(store.getState().permissions.byFileId[file.id][0].user_id, id)
+  assert.match(document.querySelector('.permissions-users').textContent, new RegExp(id))
+})
+
+test('editing permissions preserves the user and changes, including after a failed save', async (t) => {
+  const id = 'aabbccdd-1111-2222-3333-444455556666'
+  const save = t.mock.method(permissionsApi, 'saveFilePermissions', async () => { throw new Error('Сервер недоступен') })
+  await permissionsWindow(t, [{ file_id: file.id, user_id: id, code: 'files:read' }])
+  await act(async () => document.querySelector(`[aria-label="Изменить права ${id}"]`).click())
+  assert.equal(document.querySelector('#permissions-user').readOnly, true)
+  assert.equal(document.querySelector('#permissions-user').value, id)
+  const boxes = [...document.querySelectorAll('.permissions-choices input')]
+  await act(async () => { boxes[0].click(); boxes[2].click() })
+  await act(async () => document.querySelector('#permissions-editor-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })))
+  assert.deepEqual(save.mock.calls[0].arguments, [file.id, id, ['files:delete'], 'token'])
+  assert.ok(document.querySelector('#permissions-editor-form'))
+  assert.deepEqual(boxes.map((box) => box.checked), [false, false, true])
+  assert.match(document.querySelector('#permissions-editor-form').textContent, /Сервер недоступен/)
+  await act(async () => document.querySelector('.permissions-editor-actions button[type="button"]').click())
+  assert.equal(document.querySelector('#permissions-editor-form'), null)
+  assert.equal(save.mock.callCount(), 1)
+})
+
+test('removing all permissions makes revocation explicit and keeps the owner protected', async (t) => {
+  const id = 'aabbccdd-1111-2222-3333-444455556666'
+  const save = t.mock.method(permissionsApi, 'saveFilePermissions', async () => {})
+  await permissionsWindow(t, [
+    { file_id: file.id, user_id: file.owner_id, code: 'files:read' },
+    { file_id: file.id, user_id: id, code: 'files:read' },
+  ])
+  assert.equal(document.querySelectorAll('.permissions-users li').length, 2, 'owner is listed exactly once')
+  await act(async () => document.querySelector(`[aria-label="Изменить права ${id}"]`).click())
+  await act(async () => document.querySelector('.permissions-choices input').click())
+  const submit = document.querySelector('.permissions-editor-actions button[type="submit"]')
+  assert.equal(submit.textContent, 'Отозвать доступ')
+  assert.ok(submit.classList.contains('p-button-destructive'))
+  await act(async () => document.querySelector('#permissions-editor-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })))
+  assert.deepEqual(save.mock.calls[0].arguments, [file.id, id, [], 'token'])
+  assert.equal(document.querySelectorAll('.permissions-users li').length, 1)
+})
+
+test('permissions load failure offers retry without enabling access changes', async (t) => {
+  t.mock.method(actions, 'copyStoredFilePath', async () => {})
+  let attempts = 0
+  t.mock.method(permissionsApi, 'loadFilePermissions', async () => {
+    if (++attempts === 1) throw new Error('Не удалось загрузить права')
+    return []
+  })
+  await render(t)
+  await openMenu()
+  await activate('Права доступа')
+  const add = document.querySelector('[aria-controls="permissions-editor-form"]')
+  assert.equal(add.disabled, true)
+  const retry = [...document.querySelectorAll('dialog button')].find((button) => button.textContent === 'Повторить загрузку')
+  await act(async () => retry.click())
+  assert.equal(add.disabled, false)
+  assert.equal(attempts, 2)
+})
+
+test('opening access does not copy or focus the URL; the copy control performs the explicit action', async (t) => {
+  const copy = t.mock.method(actions, 'copyStoredFilePath', async () => {})
+  t.mock.method(permissionsApi, 'loadFilePermissions', async () => [])
+  await render(t)
+  await openMenu()
+  await activate('Права доступа')
+  assert.equal(copy.mock.callCount(), 0)
+  const close = document.querySelector('[aria-label="Закрыть окно общего доступа"]')
+  assert.equal(document.activeElement === close, true, 'focus starts at the close control')
+  assert.match(document.querySelector('#share-copy-status').textContent, /только пользователи с доступом/)
+  await act(async () => document.querySelector('[aria-label="Скопировать ссылку"]').click())
+  assert.equal(copy.mock.callCount(), 1)
+  assert.equal(copy.mock.calls[0].arguments[0], file.id)
+  assert.equal(copy.mock.calls[0].arguments[1] === document.querySelector('#share-file-url'), true)
+  assert.match(document.querySelector('#share-copy-status').textContent, /Ссылка скопирована/)
+})
+
+test('closing a dirty permissions draft offers continuation and never saves implicitly', async (t) => {
+  const save = t.mock.method(permissionsApi, 'saveFilePermissions', async () => {})
+  await permissionsWindow(t)
+  await act(async () => document.querySelector('[aria-controls="permissions-editor-form"]').click())
+  await enterPermissionUser('aabbccdd-1111-2222-3333-444455556666')
+  const dialog = document.querySelector('dialog')
+  await act(async () => dialog.dispatchEvent(new window.Event('cancel', { cancelable: true })))
+  assert.ok(document.querySelector('.permissions-discard'))
+  assert.equal(document.activeElement.textContent, 'Продолжить редактирование')
+  assert.ok(document.querySelector('.permissions-dialog-body').hasAttribute('inert'))
+  await act(async () => document.activeElement.click())
+  assert.equal(document.querySelector('.permissions-discard'), null)
+  assert.equal(document.querySelector('#permissions-user').value, 'aabbccdd-1111-2222-3333-444455556666')
+  await act(async () => document.querySelector('[aria-label="Закрыть окно общего доступа"]').click())
+  const discard = [...document.querySelectorAll('.permissions-discard button')].find((button) => button.textContent === 'Отменить изменения')
+  await act(async () => discard.click())
+  assert.equal(document.querySelector('dialog'), null)
+  assert.equal(save.mock.callCount(), 0)
+})
+
+test('permissions sheet follows the visible viewport when a software keyboard opens', async (t) => {
+  const descriptor = Object.getOwnPropertyDescriptor(window, 'visualViewport')
+  const viewport = Object.assign(new window.EventTarget(), { height: 480, offsetTop: 0 })
+  Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport })
+  t.after(() => {
+    if (descriptor) Object.defineProperty(window, 'visualViewport', descriptor)
+    else delete window.visualViewport
+  })
+  await permissionsWindow(t)
+  const dialog = document.querySelector('dialog')
+  assert.equal(dialog.style.getPropertyValue('--permissions-viewport-height'), '480px')
+  assert.equal(dialog.style.getPropertyValue('--permissions-keyboard-offset'), `${window.innerHeight - 480}px`)
+  viewport.height = 600
+  await act(async () => viewport.dispatchEvent(new window.Event('resize')))
+  assert.equal(dialog.style.getPropertyValue('--permissions-viewport-height'), '600px')
 })
 
 test('context menu still closes on an outside click and on keyboard focus leaving it', async (t) => {

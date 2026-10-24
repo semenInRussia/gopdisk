@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { collapsedSurfaceFrame, type SurfaceOrigin } from './surfaceAnimation'
 
-export function useSurfaceTransition<T extends HTMLElement>(ref: RefObject<T | null>, open: boolean, origin: SurfaceOrigin, onHidden?: () => void): boolean {
+export function useSurfaceTransition<T extends HTMLElement>(ref: RefObject<T | null>, open: boolean, origin: SurfaceOrigin, onHidden?: () => void, compactSheet = false): boolean {
   const [present, setPresent] = useState(open)
   const interrupted = useRef<Keyframe | null>(null)
   const hiddenCallback = useRef(onHidden)
@@ -24,7 +24,9 @@ export function useSurfaceTransition<T extends HTMLElement>(ref: RefObject<T | n
       if (!open) finishClose()
       return
     }
-    const collapsed = collapsedSurfaceFrame(element, origin)
+    const collapsed = compactSheet && window.matchMedia('(max-width: 767px)').matches
+      ? { opacity: 0, transform: 'translateY(100%)', transformOrigin: 'center' }
+      : collapsedSurfaceFrame(element, origin)
     const expanded: Keyframe = { opacity: 1, transform: 'none', transformOrigin: 'center' }
     const from = interrupted.current ?? (open ? collapsed : expanded)
     interrupted.current = null
@@ -48,7 +50,7 @@ export function useSurfaceTransition<T extends HTMLElement>(ref: RefObject<T | n
       animation.cancel()
       reducedMotion.removeEventListener('change', finish)
     }
-  }, [open, present, origin, ref])
+  }, [open, present, origin, ref, compactSheet])
 
   return present
 }

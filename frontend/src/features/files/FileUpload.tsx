@@ -116,19 +116,6 @@ export default function FileUpload({ ownerId }: FileUploadProps) {
             <h2>Все файлы</h2>
             <span className="file-count" aria-label={`Всего файлов: ${files.length}`}>{files.length}</span>
           </div>
-          <div className="files-toolbar-actions">
-            <FileSearch value={search} onChange={setSearch} />
-            <div className="p-segmented p-segmented-large file-view-control" role="group" aria-label="Вид файлов">
-              <label className="p-segment">
-                <input type="radio" name="file-view" value="list" checked={viewMode === 'list'} onChange={() => dispatch(fileViewModeChanged('list'))} />
-                <span>Список</span>
-              </label>
-              <label className="p-segment">
-                <input type="radio" name="file-view" value="grid" checked={viewMode === 'grid'} onChange={() => dispatch(fileViewModeChanged('grid'))} />
-                <span>Сетка</span>
-              </label>
-            </div>
-          </div>
         </div>
 
         {queue.total > 0 && !uploading && (
@@ -158,6 +145,21 @@ export default function FileUpload({ ownerId }: FileUploadProps) {
           <button className="p-button p-button-secondary p-button-touch-large" type="button" onClick={() => dispatch(loadFiles(ownerId))}>Повторить загрузку списка</button>
         )}
         {listStatus === 'loading' && <p className="files-placeholder" role="status"><span className="p-spinner p-spinner-small" aria-hidden="true" /> Загружаем файлы…</p>}
+        <FileBrowser files={visibleFiles} viewMode={viewMode} token={token} onError={setOpenError} totalFiles={files.length} toolbarControls={
+          <div className="files-toolbar-actions">
+            <FileSearch value={search} onChange={setSearch} />
+            <div className="p-segmented p-segmented-large file-view-control" role="group" aria-label="Вид файлов">
+              <label className="p-segment">
+                <input type="radio" name="file-view" value="list" checked={viewMode === 'list'} onChange={() => dispatch(fileViewModeChanged('list'))} />
+                <span>Список</span>
+              </label>
+              <label className="p-segment">
+                <input type="radio" name="file-view" value="grid" checked={viewMode === 'grid'} onChange={() => dispatch(fileViewModeChanged('grid'))} />
+                <span>Сетка</span>
+              </label>
+            </div>
+          </div>
+        } />
         {listStatus === 'succeeded' && files.length === 0 && !uploading && (
           <div className="files-empty">
             <Icon name="box" />
@@ -173,7 +175,6 @@ export default function FileUpload({ ownerId }: FileUploadProps) {
             <button className="p-button p-button-secondary" type="button" onClick={() => setSearch('')}>Сбросить поиск</button>
           </div>
         )}
-        <FileBrowser files={visibleFiles} viewMode={viewMode} token={token} onError={setOpenError} />
         {queue.total === 0 && <p className="upload-hint"><Icon name="compose" /> Добавьте файлы кнопкой справа внизу или перетащите их сюда.</p>}
       </section>
     </>

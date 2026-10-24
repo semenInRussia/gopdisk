@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type MouseEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type MouseEvent, type ReactNode, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { useAppDispatch, useAppSelector } from '../../app/hooks'
 import { serializeApiError } from '../../api/client'
@@ -7,12 +7,12 @@ import ToolbarGroup from '../../components/ToolbarGroup'
 import { activationPoint, type SurfaceOrigin } from '../../components/surfaceAnimation'
 import { fileRemoved, type FileViewMode, type StoredFile } from './filesSlice'
 import { describeFile, formatBytes } from './filePresentation'
-import { copyStoredFilePath, deleteStoredFile, downloadStoredFiles } from './fileActions'
+import { deleteStoredFile, downloadStoredFiles } from './fileActions'
 import { intersects, selectFileIds } from './fileSelection'
 import { openFile } from './openFile'
 import { animateFileDeletion } from './fileDeletionAnimation'
 import { selectCurrentUser } from '../users/usersSlice'
-import ShareFileDialog, { type CopyStatus } from './ShareFileDialog'
+import ShareFileDialog from './ShareFileDialog'
 import DeleteConfirmation, { type DeleteAnchor } from './DeleteConfirmation'
 
 interface Props {
@@ -20,15 +20,16 @@ interface Props {
   viewMode: FileViewMode
   token: string | null
   onError: (message: string | null) => void
+  toolbarControls?: ReactNode
+  totalFiles?: number
 }
 
-export default function FileBrowser({ files, viewMode, token, onError }: Props) {
+export default function FileBrowser({ files, viewMode, token, onError, toolbarControls, totalFiles = files.length }: Props) {
   const dispatch = useAppDispatch()
   const currentUser = useAppSelector(selectCurrentUser)
   const [selected, setSelected] = useState<string[]>([])
   const [sharedFile, setSharedFile] = useState<StoredFile | null>(null)
   const [shareOrigin, setShareOrigin] = useState<SurfaceOrigin>({ x: 0, y: 0 })
-  const [copyStatus, setCopyStatus] = useState<CopyStatus>('copying')
   const [busy, setBusy] = useState(false)
   const [deleteTargets, setDeleteTargets] = useState<StoredFile[] | null>(null)
   const [deleteAnchor, setDeleteAnchor] = useState<DeleteAnchor | null>(null)
@@ -36,7 +37,7 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
   const [toolbarStuck, setToolbarStuck] = useState(false)
   const [toolbarFloating, setToolbarFloating] = useState(false)
   const [toolbarHeight, setToolbarHeight] = useState(0)
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number; touch: boolean } | null>(null)
   const [marquee, setMarquee] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
   const root = useRef<HTMLDivElement>(null)
   const toolbarSentinel = useRef<HTMLDivElement>(null)
@@ -48,9 +49,51 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
   const anchor = useRef<string | null>(null)
   const drag = useRef<{ x: number; y: number; base: string[] } | null>(null)
   const touchSelection = useRef(false)
+  const touchHold = useRef<{ timer: number; pointerId: number; x: number; y: number } | null>(null)
+  const suppressTouchClick = useRef(false)
   const ids = files.map((file) => file.id)
   const selectedFiles = files.filter((file) => selected.includes(file.id))
   const hasFiles = files.length > 0
+  const hasToolbar = hasFiles || Boolean(toolbarControls)
+
+  function cancelTouchHold() {
+    if (touchHold.current) window.clearTimeout(touchHold.current.timer)
+    touchHold.current = null
+  }
+
+  useEffect(() => {
+    const cancel = () => {
+      cancelTouchHold()
+      touchSelection.current = false
+    }
+    const anotherPointer = (event: globalThis.PointerEvent) => {
+      if (touchHold.current && event.pointerId !== touchHold.current.pointerId) cancel()
+    }
+    window.addEventListener('scroll', cancel, true)
+    window.addEventListener('blur', cancel)
+    window.addEventListener('pointerdown', anotherPointer)
+    return () => {
+      cancel()
+      window.removeEventListener('scroll', cancel, true)
+      window.removeEventListener('blur', cancel)
+      window.removeEventListener('pointerdown', anotherPointer)
+    }
+  }, [busy, files])
+
+  function startTouchHold(event: PointerEvent<HTMLButtonElement>, id: string) {
+    cancelTouchHold()
+    suppressTouchClick.current = false
+    touchSelection.current = event.pointerType === 'touch'
+    if (!touchSelection.current || event.isPrimary === false || busy) return
+    const element = event.currentTarget
+    const { clientX: x, clientY: y, pointerId } = event
+    const timer = window.setTimeout(() => {
+      touchHold.current = null
+      suppressTouchClick.current = true
+      showMenu(id, element, x, y, true)
+    }, 500)
+    touchHold.current = { timer, pointerId, x, y }
+  }
 
   useEffect(() => {
     const sentinel = toolbarSentinel.current
@@ -68,13 +111,13 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
       observer.disconnect()
       resizeObserver.disconnect()
     }
-  }, [hasFiles])
+  }, [hasToolbar])
 
   useLayoutEffect(() => {
     const toolbar = toolbarRef.current
     const slot = toolbarSlot.current
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
-    if (!hasFiles) { setToolbarFloating(false); return }
+    if (!hasToolbar) { setToolbarFloating(false); return }
     if (toolbarStuck && !toolbarFloating) { setToolbarFloating(true); return }
     if (!toolbarFloating || !toolbar || !slot) return
     if (reducedMotion.matches) {
@@ -141,7 +184,7 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
       window.removeEventListener('resize', finish)
       window.removeEventListener('scroll', followScroll)
     }
-  }, [toolbarStuck, toolbarFloating, hasFiles])
+  }, [toolbarStuck, toolbarFloating, hasToolbar])
 
   useEffect(() => {
     setSelected((current) => {
@@ -156,29 +199,46 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
     root.current?.focus({ preventScroll: true })
   }
 
-  async function shareFile(event: MouseEvent<HTMLButtonElement>) {
+  function shareFile(event: MouseEvent<HTMLButtonElement>) {
     if (busy || selectedFiles.length !== 1) return
     const file = selectedFiles[0]
     setShareOrigin(activationPoint(event))
-    // Start copying before moving focus or removing the clicked menu item.
-    const copying = copyStoredFilePath(file.id)
     setMenu(null)
-    setCopyStatus('copying')
     setSharedFile(file)
-    try {
-      await copying
-      setCopyStatus('copied')
-    } catch {
-      setCopyStatus('failed')
-    }
   }
 
-  function showMenu(id: string, element: HTMLButtonElement, x: number, y: number) {
+  function showMenu(id: string, element: HTMLButtonElement, x: number, y: number, touch = false) {
     if (busy) return
     if (!selected.includes(id)) { setSelected([id]); anchor.current = id }
     returnFocus.current = element
-    setMenu({ x: Math.max(8, Math.min(x, window.innerWidth - 208)), y: Math.max(8, Math.min(y, window.innerHeight - 208)) })
+    setMenu({ x, y, touch })
   }
+
+  useLayoutEffect(() => {
+    const element = menuRef.current
+    if (!menu || !element) return
+    const { width, height } = element.getBoundingClientRect()
+    const viewport = window.visualViewport
+    const leftEdge = (viewport?.offsetLeft ?? 0) + 8
+    const topEdge = (viewport?.offsetTop ?? 0) + 8
+    const rightEdge = leftEdge + (viewport?.width ?? window.innerWidth) - 16
+    const bottomEdge = topEdge + (viewport?.height ?? window.innerHeight) - 16
+    const anchor = returnFocus.current?.getBoundingClientRect()
+    let x = menu.x
+    let y = menu.y
+    if (menu.touch && anchor) {
+      x = anchor.left + width <= rightEdge ? anchor.left : anchor.right - width
+      y = anchor.bottom + 16
+      if (y + height > bottomEdge) {
+        y = anchor.top
+        if (anchor.right + 16 + width <= rightEdge) x = anchor.right + 16
+        else if (anchor.left - 16 - width >= leftEdge) x = anchor.left - 16 - width
+        else y = anchor.top - 16 - height
+      }
+    }
+    element.style.left = `${Math.max(leftEdge, Math.min(x, rightEdge - width))}px`
+    element.style.top = `${Math.max(topEdge, Math.min(y, bottomEdge - height))}px`
+  }, [menu])
 
   useEffect(() => {
     if (!menu) return
@@ -187,12 +247,26 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
       if (event.target instanceof Node && !menuRef.current?.contains(event.target)) setMenu(null)
     }
     const dismiss = () => setMenu(null)
+    // The compatibility click from lifting the held finger may target a menu
+    // command. Consume it before either React or the browser can activate it.
+    const releaseClick = (event: globalThis.MouseEvent) => {
+      if (!suppressTouchClick.current || event.detail === 0) return
+      suppressTouchClick.current = false
+      touchSelection.current = false
+      event.preventDefault()
+      event.stopImmediatePropagation()
+    }
+    const newGesture = () => { suppressTouchClick.current = false }
+    document.addEventListener('click', releaseClick, true)
+    document.addEventListener('pointerdown', newGesture, true)
     document.addEventListener('pointerdown', outside)
     window.addEventListener('blur', dismiss)
     window.addEventListener('resize', dismiss)
     window.addEventListener('scroll', dismiss, true)
     return () => {
       document.removeEventListener('pointerdown', outside)
+      document.removeEventListener('click', releaseClick, true)
+      document.removeEventListener('pointerdown', newGesture, true)
       window.removeEventListener('blur', dismiss)
       window.removeEventListener('resize', dismiss)
       window.removeEventListener('scroll', dismiss, true)
@@ -310,25 +384,32 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
     }
   }
 
-  if (files.length === 0) return null
+  if (!hasToolbar) return null
 
   return (
-    <section className="file-browser" aria-label="Обзор файлов" aria-busy={busy}>
+    <section className="file-browser" aria-label="Обзор файлов" aria-busy={busy} style={{ '--file-toolbar-height': `${toolbarHeight}px` } as CSSProperties}>
       <div className="file-toolbar-sentinel" ref={toolbarSentinel} aria-hidden="true" />
       <div ref={toolbarSlot} className="file-selection-toolbar-slot" style={{ height: toolbarHeight || undefined }}>
         <div ref={toolbarRef} className={`file-selection-toolbar${toolbarFloating ? ' p-material-thick file-selection-toolbar--stuck' : ''}`}>
-          <span role="status" aria-live="polite">{downloadProgress ?? (busy ? 'Выполняем действие…' : selectedFiles.length ? `Выбрано: ${selectedFiles.length}` : 'Выберите файлы для действий')}</span>
+          {(downloadProgress || busy) && <span role="status" aria-live="polite">{downloadProgress ?? 'Выполняем действие…'}</span>}
+          <div className="file-toolbar-main">
           <ToolbarGroup label="Действия с выбранными файлами" className="file-selection-actions">
             <button type="button" className="p-toolbar-btn file-touch-open" aria-label="Открыть" title="Открыть" disabled={busy || selectedFiles.length !== 1} onClick={() => void open(selectedFiles[0].id)}><Icon name="open" /><span>Открыть</span></button>
-            <button type="button" className="p-toolbar-btn" aria-label="Права доступа" title="Права доступа" disabled={busy || selectedFiles.length !== 1} onClick={(event) => void shareFile(event)}><Icon name="lock" /><span>Права доступа</span></button>
+            <button type="button" className="p-toolbar-btn" aria-label="Права доступа" title="Права доступа" disabled={busy || selectedFiles.length !== 1} onClick={(event) => void shareFile(event)}><Icon name="link" /><span>Права доступа</span></button>
             <button type="button" className="p-toolbar-btn" aria-label="Скачать" title="Скачать" disabled={busy || !selectedFiles.length} onClick={() => void runAction('download')}><Icon name="download" /><span>Скачать</span></button>
             <div className="p-toolbar-divider" role="separator" aria-orientation="vertical" />
             <button type="button" className="p-toolbar-btn file-toolbar-delete" aria-label="Удалить" title="Удалить" disabled={busy || !selectedFiles.length} onClick={(event) => void runAction('delete', undefined, event.currentTarget)}><Icon name="trash" /><span>Удалить</span></button>
           </ToolbarGroup>
+          {toolbarControls}
+          </div>
         </div>
       </div>
-      <p className="visually-hidden" id="file-selection-help">На сенсорном экране касание добавляет файл к выделению или снимает выделение. Для открытия выберите один файл и нажмите «Открыть». Клик — выделить, Cmd или Ctrl и клик — добавить к выделению, Shift и клик — диапазон. Двойной клик или Enter — открыть. Cmd или Ctrl и A — выбрать всё, Escape — снять выделение. Контекстное меню: правая кнопка мыши или Shift и F10.</p>
-      <div ref={root} className="file-browser-content" tabIndex={0} aria-label="Выбор файлов" aria-describedby="file-selection-help" onKeyDown={keyboard}
+      {createPortal(<div className="p-material-thick file-page-counters" role="status" aria-live="polite" data-visible={toolbarFloating} aria-hidden={!toolbarFloating} inert={!toolbarFloating}>
+        <span>Выбрано: <strong>{selectedFiles.length}</strong></span>
+        <span>Всего файлов: <strong>{totalFiles}</strong></span>
+      </div>, document.body)}
+      <p className="visually-hidden" id="file-selection-help">На сенсорном экране касание добавляет файл к выделению или снимает выделение. Удерживайте палец на файле, чтобы открыть контекстное меню. Для открытия выберите один файл и нажмите «Открыть». Клик — выделить, Cmd или Ctrl и клик — добавить к выделению, Shift и клик — диапазон. Двойной клик или Enter — открыть. Cmd или Ctrl и A — выбрать всё, Escape — снять выделение. Контекстное меню: правая кнопка мыши или Shift и F10.</p>
+      <div ref={root} className="file-browser-content" hidden={!hasFiles} tabIndex={0} aria-label="Выбор файлов" aria-describedby="file-selection-help" onKeyDown={keyboard}
         onPointerDown={startSelection} onPointerMove={moveSelection} onPointerUp={endSelection} onPointerCancel={endSelection} onLostPointerCapture={endSelection}>
         <ul className={`files-list${viewMode === 'grid' ? ' files-list--grid' : ''}`}>
           {files.map((file) => {
@@ -336,8 +417,21 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
             return <li key={file.id}>
               <button className={`file-open${selected.includes(file.id) ? ' file-open--selected' : ''}`} data-file-id={file.id} type="button" aria-pressed={selected.includes(file.id)} disabled={busy}
                 aria-label={file.name} title={file.name}
-                onPointerDown={(event) => { touchSelection.current = event.pointerType === 'touch' }}
+                onPointerDown={(event) => startTouchHold(event, file.id)}
+                onPointerMove={(event) => {
+                  const hold = touchHold.current
+                  if (hold && Math.hypot(event.clientX - hold.x, event.clientY - hold.y) > 10) cancelTouchHold()
+                }}
+                onPointerUp={cancelTouchHold}
+                onPointerCancel={() => { cancelTouchHold(); touchSelection.current = false }}
+                onLostPointerCapture={cancelTouchHold}
                 onClick={(event) => {
+                  if (suppressTouchClick.current) {
+                    event.preventDefault()
+                    suppressTouchClick.current = false
+                    touchSelection.current = false
+                    return
+                  }
                   const toggle = touchSelection.current || event.metaKey || event.ctrlKey
                   touchSelection.current = false
                   setSelected((current) => selectFileIds(current, ids, file.id, anchor.current, { toggle, range: event.shiftKey }))
@@ -354,21 +448,23 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
                 }}
                 onContextMenu={(event) => {
                   event.preventDefault()
-                  showMenu(file.id, event.currentTarget, event.clientX, event.clientY)
+                  cancelTouchHold()
+                  if (touchSelection.current) suppressTouchClick.current = true
+                  showMenu(file.id, event.currentTarget, event.clientX, event.clientY, touchSelection.current || suppressTouchClick.current)
                 }}>
                 <span className={`file-icon file-icon--${presentation.icon}`}><Icon name={presentation.icon} /></span>
                 {viewMode === 'list' && <>
                   <span className="file-details"><strong>{file.name}</strong><small>{presentation.label}</small></span>
                   <span className="file-size">{formatBytes(file.size)}</span>
                 </>}
+                {viewMode === 'grid' && <span className="file-details" aria-hidden="true"><strong>{file.name}</strong></span>}
               </button>
-              {viewMode === 'grid' && <span className="file-details" aria-hidden="true" title={file.name}><strong>{file.name}</strong></span>}
             </li>
           })}
         </ul>
       </div>
       {marquee && createPortal(<div className="file-selection-rect" style={marquee} aria-hidden="true" />, document.body)}
-      {menu && createPortal(<div ref={menuRef} className="p-menu file-context-menu" role="menu" aria-label="Действия с файлами" style={{ left: menu.x, top: menu.y }} onMouseDown={(event) => {
+      {menu && createPortal(<div ref={menuRef} className={`p-menu file-context-menu${menu.touch ? ' p-menu-touch p-menu-touch--context' : ''}`} role="menu" aria-label="Действия с файлами" style={{ left: menu.x, top: menu.y }} onMouseDown={(event) => {
         // Safari may blur to the page before click when pressing a menu button.
         if (event.button === 0) event.preventDefault()
       }} onBlur={(event) => {
@@ -388,7 +484,7 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
         <div className="p-menu__separator" role="separator" />
         <button type="button" role="menuitem" className="p-menu__item p-menu__item--destructive" onClick={(event) => void runAction('delete', undefined, event.currentTarget)}><span className="p-menu__icon"><Icon name="trash" /></span>Удалить{selectedFiles.length > 1 ? ` (${selectedFiles.length})` : ''}</button>
       </div>, document.body)}
-      {sharedFile && <ShareFileDialog key={sharedFile.id} file={sharedFile} origin={shareOrigin} initialStatus={copyStatus} token={token} canManagePermissions={sharedFile.owner_id === currentUser?.id} onClose={() => {
+      {sharedFile && <ShareFileDialog key={sharedFile.id} file={sharedFile} origin={shareOrigin} initialStatus="idle" token={token} canManagePermissions={sharedFile.owner_id === currentUser?.id} onClose={() => {
         setSharedFile(null)
         if (returnFocus.current?.isConnected) returnFocus.current.focus()
         root.current?.focus()

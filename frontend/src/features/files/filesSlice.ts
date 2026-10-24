@@ -35,6 +35,22 @@ interface UploadState {
 }
 
 const UPLOAD_CONCURRENCY = 3
+const UPLOAD_PART_ATTEMPTS = 3
+
+function waitForPartRetry(delay: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    signal.throwIfAborted()
+    const abort = () => {
+      clearTimeout(timer)
+      reject(signal.reason)
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', abort)
+      resolve()
+    }, delay)
+    signal.addEventListener('abort', abort, { once: true })
+  })
+}
 
 const filesAdapter = createEntityAdapter<StoredFile>({
   sortComparer: (left, right) => left.name.localeCompare(right.name),
@@ -85,6 +101,7 @@ export const uploadFile = createAsyncThunk<
 
   let uploadId: string | null = null
   let workers: Promise<void>[] = []
+  let partFailure: ApiError | null = null
 
   try {
     const initialized = await apiRequest<UploadInitializationEnvelope>('/v1/files/upload', {
@@ -108,18 +125,43 @@ export const uploadFile = createAsyncThunk<
     let nextPosition = 0
 
     const uploadWorker = async () => {
-      while (nextPosition < partCount) {
+      while (nextPosition < partCount && !controller.signal.aborted) {
         const position = nextPosition
         nextPosition += 1
         const start = position * partSize
         const part = file.slice(start, Math.min(start + partSize, file.size))
 
         let sentBytes = 0
-        await apiUploadPart(`/v1/uploads/${uploadId}/parts/${position}`, part, controller.signal, (bytes) => {
-          const delta = Math.max(0, bytes - sentBytes)
-          sentBytes += delta
-          if (delta > 0) dispatch(uploadProgressed(delta))
-        }, token)
+        for (let attempt = 1; attempt <= UPLOAD_PART_ATTEMPTS; attempt += 1) {
+          controller.signal.throwIfAborted()
+          try {
+            await apiUploadPart(`/v1/uploads/${uploadId}/parts/${position}`, part, controller.signal, (bytes) => {
+              if (controller.signal.aborted) return
+              // Each retry starts at byte zero; retain the part's high-water
+              // mark so retransmitted bytes never inflate logical progress.
+              const delta = Math.max(0, bytes - sentBytes)
+              sentBytes += delta
+              if (delta > 0) dispatch(uploadProgressed(delta))
+            }, token)
+            break
+          } catch (error) {
+            if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) throw error
+            const cause = serializeApiError(error)
+            const retryable = cause.status === undefined || cause.status === 0 || cause.status === 408 || cause.status === 429 || (cause.status >= 500 && cause.status <= 599)
+            if (retryable && attempt < UPLOAD_PART_ATTEMPTS) {
+              await waitForPartRetry(300 * 2 ** (attempt - 1), controller.signal)
+              continue
+            }
+            partFailure = {
+              ...cause,
+              message: `Не удалось загрузить часть ${position + 1} из ${partCount}${attempt > 1 ? ` за ${attempt} попытки` : ''}. ${cause.message}`,
+            }
+            // Record the original error before aborting siblings, whose abort
+            // rejections may otherwise win the Promise.all race.
+            controller.abort()
+            throw error
+          }
+        }
       }
     }
 
@@ -128,6 +170,7 @@ export const uploadFile = createAsyncThunk<
       () => uploadWorker(),
     )
     await Promise.all(workers)
+    controller.signal.throwIfAborted()
 
     const completed = await apiRequest<FileEnvelope>(`/v1/uploads/${uploadId}/complete`, {
       method: 'POST',
@@ -137,15 +180,17 @@ export const uploadFile = createAsyncThunk<
   } catch (error) {
     controller.abort()
     await Promise.allSettled(workers)
+    const uploadError = partFailure ?? serializeApiError(error)
 
     if (uploadId) {
       try {
-        await apiRequest(`/v1/uploads/${uploadId}`, { method: 'DELETE' }, token)
-      } catch {
-        // Preserve the upload error. An unfinished session can still be resumed or removed later.
+        await apiRequest(`/v1/uploads/${uploadId}`, { method: 'DELETE', signal: AbortSignal.timeout(10_000) }, token)
+        uploadError.message += ' Загрузка файла отменена.'
+      } catch (cleanupError) {
+        uploadError.message += ` Загрузка остановлена, но не удалось подтвердить отмену на сервере: ${serializeApiError(cleanupError).message}`
       }
     }
-    return rejectWithValue(serializeApiError(error))
+    return rejectWithValue(uploadError)
   } finally {
     signal.removeEventListener('abort', abortUpload)
   }

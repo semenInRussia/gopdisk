@@ -1,6 +1,9 @@
 import type { SVGProps } from 'react'
 
 const paths = {
+  copy: 'M9 9h12v12H9V9ZM5 15H3V3h12v2',
+  plus: 'M12 5v14M5 12h14',
+  link: 'M10 13a5 5 0 0 0 7 .1l3-3a5 5 0 0 0-7.1-7.1l-1.7 1.7M14 11a5 5 0 0 0-7-.1l-3 3a5 5 0 0 0 7.1 7.1l1.7-1.7',
   open: 'M14 3h7v7M21 3 10 14M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5',
   compose: 'M20 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h6M15 4l5 5M10 14l1-5 7-7a2.12 2.12 0 0 1 3 3l-7 7-4 2Z',
   search: 'M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z',
