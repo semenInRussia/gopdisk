@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -92,7 +93,13 @@ func (app *Application) serve() error {
 	gcCtx, cancelGC := context.WithCancel(context.Background())
 	defer cancelGC()
 
-	app.background(func() {
+	go func() {
+		defer func() {
+			if err := recover(); err != nil {
+				app.logger.Printf("background panic: %v\n%s", err, debug.Stack())
+			}
+		}()
+
 		for {
 			_, err := app.storage.CollectGarbageBlobs(gcCtx)
 			if err != nil && gcCtx.Err() == nil {
@@ -102,10 +109,10 @@ func (app *Application) serve() error {
 			select {
 			case <-gcCtx.Done():
 				return
-			case <-time.After(10 * time.Second):
+			case <-time.After(10 * time.Minute):
 			}
 		}
-	})
+	}()
 
 	shutdownError := make(chan error)
 
