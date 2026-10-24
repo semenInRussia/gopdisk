@@ -15,7 +15,7 @@ export default function App() {
   }, [dispatch, sessionStatus])
 
   if (sessionStatus === 'checking') {
-    return <main className="auth-card loading-card" role="status"><span className="p-spinner p-spinner-small" aria-hidden="true" />Восстанавливаем сессию…</main>
+    return <main className="p-glass auth-card loading-card" role="status"><span className="p-spinner p-spinner-small" aria-hidden="true" />Восстанавливаем сессию…</main>
   }
 
   const authenticated = sessionStatus === 'authenticated'

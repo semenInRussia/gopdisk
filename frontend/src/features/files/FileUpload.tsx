@@ -123,7 +123,7 @@ export default function FileUpload({ ownerId }: FileUploadProps) {
         document.body,
       )}
       {dragging && !uploading && createPortal(
-        <div className="page-drop-overlay" role="status" aria-live="polite">
+        <div className="p-material-thick page-drop-overlay" role="status" aria-live="polite">
           <div>
             <Icon name="box" />
             <strong>Отпустите файлы для загрузки</strong>
@@ -136,10 +136,10 @@ export default function FileUpload({ ownerId }: FileUploadProps) {
         className="files-section"
         aria-label="Файлы"
       >
-        <div className="files-toolbar">
+        <div className="p-glass files-toolbar">
           <div className="files-heading">
             <h2>Все файлы</h2>
-            <span className="file-count" aria-label={`Всего файлов: ${files.length}`}>{files.length}</span>
+            <span className="p-glass-sm file-count" aria-label={`Всего файлов: ${files.length}`}>{files.length}</span>
           </div>
           <label className="file-search">
             <Icon name="search" />
@@ -157,7 +157,7 @@ export default function FileUpload({ ownerId }: FileUploadProps) {
         )}
 
         {uploading && createPortal(
-          <aside className="upload-progress" role="status" aria-live="polite" aria-label="Загрузка файлов">
+          <aside className="p-glass upload-progress" role="status" aria-live="polite" aria-label="Загрузка файлов">
             <strong>Загрузка файлов · {progress}%</strong>
             <progress className="p-progress" max={100} value={progress} aria-label={`Загрузка ${upload.filename ?? 'файла'}`} />
             <p>{upload.filename}: {formatBytes(upload.uploadedBytes)} из {formatBytes(upload.totalBytes)}</p>
@@ -172,22 +172,22 @@ export default function FileUpload({ ownerId }: FileUploadProps) {
         {listError && <StatusMessage error={listError} />}
         {openError && <StatusMessage error={{ message: openError }} />}
         {listStatus === 'failed' && (
-          <button className="p-button p-button-secondary p-button-touch-large" type="button" onClick={() => dispatch(loadFiles(ownerId))}>Повторить загрузку списка</button>
+          <button className="p-button p-button-glass p-button-touch-large" type="button" onClick={() => dispatch(loadFiles(ownerId))}>Повторить загрузку списка</button>
         )}
         {listStatus === 'loading' && <p className="files-placeholder" role="status"><span className="p-spinner p-spinner-small" aria-hidden="true" /> Загружаем файлы…</p>}
         {listStatus === 'succeeded' && files.length === 0 && !uploading && (
-          <div className="files-empty">
+          <div className="p-glass files-empty">
             <Icon name="box" />
             <h2>Здесь пока нет файлов</h2>
             <p>Перетащите файлы сюда или нажмите кнопку с карандашом справа внизу.</p>
           </div>
         )}
         {files.length > 0 && visibleFiles.length === 0 && (
-          <div className="files-empty" role="status">
+          <div className="p-glass files-empty" role="status">
             <Icon name="search" />
             <h2>Ничего не найдено</h2>
             <p>Попробуйте другое название файла.</p>
-            <button className="p-button p-button-secondary" type="button" onClick={() => setSearch('')}>Сбросить поиск</button>
+            <button className="p-button p-button-glass" type="button" onClick={() => setSearch('')}>Сбросить поиск</button>
           </div>
         )}
         {visibleFiles.length > 0 && (
@@ -197,13 +197,13 @@ export default function FileUpload({ ownerId }: FileUploadProps) {
               return (
                 <li key={file.id}>
                   <button
-                    className="file-open"
+                    className="p-glass file-open"
                     type="button"
                     onClick={() => handleOpenFile(file.id)}
                     aria-label={`Открыть ${file.name} в новой вкладке, ${formatBytes(file.size)}`}
                     title={`Открыть ${file.name} в новой вкладке`}
                   >
-                    <span className={`file-icon file-icon--${presentation.icon}`}><Icon name={presentation.icon} /></span>
+                    <span className={`p-glass-sm file-icon file-icon--${presentation.icon}`}><Icon name={presentation.icon} /></span>
                     <span className="file-details">
                       <strong>{file.name}</strong>
                       <small>{presentation.label}</small>

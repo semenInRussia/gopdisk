@@ -29,7 +29,7 @@ export default function Login() {
   }
 
   return (
-    <main className="auth-card auth-card--compact">
+    <main className="p-glass auth-card auth-card--compact">
       <header className="auth-header">
         <h1>Вход в GopherDisk</h1>
         <p>Ваши файлы под рукой.</p>
@@ -51,7 +51,7 @@ export default function Login() {
         <div className="form-divider" aria-hidden="true" />
         <div className="form-actions form-actions--split">
           <Link className="text-link" to="/register">Создать аккаунт</Link>
-          <button className="p-button p-button-primary p-button-touch-large" type="submit" disabled={requestStatus === 'loading'}>
+          <button className="p-button p-button-glass-prominent p-button-touch-large" type="submit" disabled={requestStatus === 'loading'}>
             {requestStatus === 'loading' ? 'Входим…' : 'Войти'}
           </button>
         </div>
