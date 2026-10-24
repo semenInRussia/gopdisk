@@ -3,6 +3,7 @@ import { apiRequest, apiUploadPart, serializeApiError, type ApiError } from '../
 import type { AppDispatch, RootState } from '../../app/store'
 
 export type FileStatus = 'uploading' | 'ready'
+export type FileViewMode = 'list' | 'grid'
 
 export interface StoredFile {
   id: string
@@ -48,6 +49,7 @@ const emptyUpload: UploadState = {
 }
 
 const initialState = filesAdapter.getInitialState({
+  viewMode: 'list' as FileViewMode,
   selectedFileId: null as string | null,
   listStatus: 'idle' as 'idle' | 'loading' | 'succeeded' | 'failed',
   listError: null as ApiError | null,
@@ -153,6 +155,9 @@ const filesSlice = createSlice({
   name: 'files',
   initialState,
   reducers: {
+    fileViewModeChanged(state, action: PayloadAction<FileViewMode>) {
+      state.viewMode = action.payload
+    },
     filesReceived: filesAdapter.setAll,
     fileUpserted: filesAdapter.upsertOne,
     fileRemoved(state, action: PayloadAction<string>) {
@@ -215,6 +220,7 @@ const filesSlice = createSlice({
 })
 
 export const {
+  fileViewModeChanged,
   fileRemoved,
   fileSelected,
   fileUpserted,

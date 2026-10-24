@@ -524,6 +524,26 @@ body {
   margin: 0;
 }
 
+.files-toolbar-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gd-space-3);
+  justify-content: flex-end;
+  margin-inline-start: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.file-view-control {
+  flex-shrink: 0;
+}
+
+.file-view-control .p-segment input:focus-visible + span {
+  outline: 3px solid var(--p-sys-blue);
+  outline-offset: 3px;
+}
+
 .file-count {
   border-radius: 8px;
   color: var(--p-text-secondary);
@@ -675,6 +695,57 @@ body {
   --p-glass-surface: color-mix(in srgb, var(--p-sys-blue) 6%, var(--p-glass-md));
 }
 
+.files-list--grid {
+  --p-glass-surface: color-mix(in srgb, var(--p-glass-md) 70%, var(--p-bg-elevated-primary));
+  border: 1px solid var(--gd-divider);
+  border-radius: 16px;
+  box-shadow: var(--p-glass-edge), var(--p-shadow-glass-control);
+  gap: var(--gd-space-2);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 112px), 1fr));
+  padding: var(--gd-space-4);
+}
+
+.files-list--grid li {
+  min-width: 0;
+}
+
+.files-list--grid .file-open {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  grid-template-columns: minmax(0, 1fr);
+  height: 100%;
+  align-content: start;
+  justify-items: center;
+  gap: var(--gd-space-2);
+  padding: var(--gd-space-3) var(--gd-space-2);
+  text-align: center;
+}
+
+.files-list--grid .file-icon {
+  background: transparent;
+  box-shadow: none;
+  height: 64px;
+  width: 64px;
+  border-radius: 18px;
+}
+
+.files-list--grid .file-icon svg {
+  height: 36px;
+  width: 36px;
+}
+
+.files-list--grid .file-details {
+  width: 100%;
+}
+
+.files-list--grid .file-details strong {
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .file-open:active {
   --p-glass-surface: color-mix(in srgb, var(--p-sys-blue) 12%, var(--p-glass-md));
 }
@@ -798,6 +869,15 @@ body {
     width: 100%;
   }
 
+  .files-toolbar-actions {
+    width: 100%;
+  }
+
+  .file-view-control {
+    --p-seg-height: 44px;
+    --p-seg-radius: 22px;
+  }
+
   .file-search .p-field {
     --p-field-height: 44px;
     --p-field-font: 1rem;
@@ -861,6 +941,7 @@ body {
   .p-button::before,
   .p-button::after,
   .p-field,
+  .file-view-control .p-segment > span,
   .file-open {
     transition: none;
   }

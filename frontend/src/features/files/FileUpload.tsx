@@ -8,6 +8,7 @@ import { openFile } from './openFile'
 import { createUploadQueue, emptyUploadQueue } from './uploadQueue'
 import { listenForPageFileDrops } from './pageFileDrop'
 import {
+  fileViewModeChanged,
   loadFiles,
   selectAllFiles,
   selectFilesListError,
@@ -47,6 +48,7 @@ export default function FileUpload({ ownerId }: FileUploadProps) {
   const listStatus = useAppSelector(selectFilesListStatus)
   const listError = useAppSelector(selectFilesListError)
   const upload = useAppSelector(selectUpload)
+  const viewMode = useAppSelector((state) => state.files.viewMode)
   const queueRef = useRef<ReturnType<typeof createUploadQueue> | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const [queue, setQueue] = useState(emptyUploadQueue)
@@ -141,11 +143,23 @@ export default function FileUpload({ ownerId }: FileUploadProps) {
             <h2>Все файлы</h2>
             <span className="p-glass-sm file-count" aria-label={`Всего файлов: ${files.length}`}>{files.length}</span>
           </div>
-          <label className="file-search">
-            <Icon name="search" />
-            <span className="visually-hidden">Поиск файлов по имени</span>
-            <input className="p-field" type="search" placeholder="Поиск файлов" value={search} onChange={(event) => setSearch(event.target.value)} />
-          </label>
+          <div className="files-toolbar-actions">
+            <label className="file-search">
+              <Icon name="search" />
+              <span className="visually-hidden">Поиск файлов по имени</span>
+              <input className="p-field" type="search" placeholder="Поиск файлов" value={search} onChange={(event) => setSearch(event.target.value)} />
+            </label>
+            <div className="p-segmented p-segmented-large file-view-control" role="group" aria-label="Вид файлов">
+              <label className="p-segment">
+                <input type="radio" name="file-view" value="list" checked={viewMode === 'list'} onChange={() => dispatch(fileViewModeChanged('list'))} />
+                <span>Список</span>
+              </label>
+              <label className="p-segment">
+                <input type="radio" name="file-view" value="grid" checked={viewMode === 'grid'} onChange={() => dispatch(fileViewModeChanged('grid'))} />
+                <span>Сетка</span>
+              </label>
+            </div>
+          </div>
         </div>
 
         {queue.total > 0 && !uploading && (
@@ -191,24 +205,24 @@ export default function FileUpload({ ownerId }: FileUploadProps) {
           </div>
         )}
         {visibleFiles.length > 0 && (
-          <ul className="files-list">
+          <ul className={`files-list${viewMode === 'grid' ? ' p-glass files-list--grid' : ''}`}>
             {visibleFiles.map((file) => {
               const presentation = describeFile(file.type, file.name)
               return (
                 <li key={file.id}>
                   <button
-                    className="p-glass file-open"
+                    className={viewMode === 'grid' ? 'file-open' : 'p-glass file-open'}
                     type="button"
                     onClick={() => handleOpenFile(file.id)}
-                    aria-label={`Открыть ${file.name} в новой вкладке, ${formatBytes(file.size)}`}
+                    aria-label={`Открыть ${file.name} в новой вкладке${viewMode === 'list' ? `, ${formatBytes(file.size)}` : ''}`}
                     title={`Открыть ${file.name} в новой вкладке`}
                   >
-                    <span className={`p-glass-sm file-icon file-icon--${presentation.icon}`}><Icon name={presentation.icon} /></span>
+                    <span className={`${viewMode === 'list' ? 'p-glass-sm ' : ''}file-icon file-icon--${presentation.icon}`}><Icon name={presentation.icon} /></span>
                     <span className="file-details">
                       <strong>{file.name}</strong>
-                      <small>{presentation.label}</small>
+                      {viewMode === 'list' && <small>{presentation.label}</small>}
                     </span>
-                    <span className="file-size">{formatBytes(file.size)}</span>
+                    {viewMode === 'list' && <span className="file-size">{formatBytes(file.size)}</span>}
                   </button>
                 </li>
               )
