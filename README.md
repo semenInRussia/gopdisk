@@ -65,6 +65,13 @@ cd frontend
 npm run build
 ```
 
+The UI uses [Puppertino](https://github.com/codedgar/Puppertino) 2.0.0.
+Its CSS modules are bundled locally through Vite; `frontend/src/styles.css`
+contains the application layout and dark palette customizations.
+Typography, spacing, form labels, feedback, and floating controls follow
+[Apple's Human Interface Guidelines](https://developer.apple.com/design/human-interface-guidelines/).
+The dark theme supports increased contrast and reduced transparency preferences.
+
 The API sends registration messages through SMTP. Configure it with
 `GOPHERDISK_SMTP_HOST`, `GOPHERDISK_SMTP_PORT`,
 `GOPHERDISK_SMTP_USERNAME`, `GOPHERDISK_SMTP_PASSWORD`, and

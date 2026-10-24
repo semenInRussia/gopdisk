@@ -1,4 +1,9 @@
 import type { ApiError } from '../../api/client'
+import Icon from '../../components/Icon'
+
+const fieldLabels: Record<string, string> = {
+  name: 'Имя пользователя', email: 'Электронная почта', password: 'Пароль',
+}
 
 interface StatusMessageProps {
   error?: ApiError | null
@@ -11,17 +16,20 @@ export default function StatusMessage({ error, message }: StatusMessageProps) {
   if (error) {
     return (
       <div className="status-message status-message--error" role="alert">
-        <p>{error.message}</p>
-        {error.fields && (
-          <ul>
-            {Object.entries(error.fields).map(([field, detail]) => (
-              <li key={field}>{field}: {detail}</li>
-            ))}
-          </ul>
-        )}
+        <Icon name="warning" />
+        <div>
+          <p>{error.message}</p>
+          {error.fields && (
+            <ul>
+              {Object.entries(error.fields).map(([field, detail]) => (
+                <li key={field}>{fieldLabels[field] ?? field}: {detail}</li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
     )
   }
 
-  return <div className="status-message status-message--success" role="status">{message}</div>
+  return <div className="status-message status-message--success" role="status"><Icon name="check" /><p>{message}</p></div>
 }

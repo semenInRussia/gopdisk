@@ -20,7 +20,17 @@ export function listenForPageFileDrops(
     event.preventDefault()
     event.dataTransfer.dropEffect = 'copy'
   }
-  const leave = () => {
+  const leave = (event: DragEvent) => {
+    // Leaving the window can skip dragleave events for nested elements.
+    // Reset immediately instead of waiting for the depth counter to reach zero.
+    const outsideWindow = event.clientX <= 0 || event.clientY <= 0
+      || event.clientX >= target.innerWidth || event.clientY >= target.innerHeight
+    const leftDocument = event.relatedTarget === null
+      && (event.target === target.document || event.target === target.document?.documentElement)
+    if (outsideWindow || leftDocument) {
+      reset()
+      return
+    }
     depth = Math.max(0, depth - 1)
     if (depth === 0) onDragging(false)
   }

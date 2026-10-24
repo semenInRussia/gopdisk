@@ -1,5 +1,5 @@
 import { createAsyncThunk, createEntityAdapter, createSlice, type PayloadAction } from '@reduxjs/toolkit'
-import { apiRequest, serializeApiError, type ApiError } from '../../api/client'
+import { apiRequest, apiUploadPart, serializeApiError, type ApiError } from '../../api/client'
 import type { AppDispatch, RootState } from '../../app/store'
 
 export type FileStatus = 'uploading' | 'ready'
@@ -112,13 +112,12 @@ export const uploadFile = createAsyncThunk<
         const start = position * partSize
         const part = file.slice(start, Math.min(start + partSize, file.size))
 
-        await apiRequest(`/v1/uploads/${uploadId}/parts/${position}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/octet-stream' },
-          body: part,
-          signal: controller.signal,
+        let sentBytes = 0
+        await apiUploadPart(`/v1/uploads/${uploadId}/parts/${position}`, part, controller.signal, (bytes) => {
+          const delta = Math.max(0, bytes - sentBytes)
+          sentBytes += delta
+          if (delta > 0) dispatch(uploadProgressed(delta))
         }, token)
-        dispatch(uploadProgressed(part.size))
       }
     }
 

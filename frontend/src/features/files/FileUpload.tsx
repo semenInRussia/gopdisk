@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useAppDispatch, useAppSelector } from '../../app/hooks'
+import Icon, { type IconName } from '../../components/Icon'
 import StatusMessage from '../auth/StatusMessage'
 import { serializeApiError } from '../../api/client'
 import { openFile } from './openFile'
@@ -29,6 +30,16 @@ function formatBytes(bytes: number): string {
   return `${value.toLocaleString('ru-RU', { maximumFractionDigits: unit === 0 ? 0 : 1 })} ${units[unit]}`
 }
 
+function describeFile(type: string, name: string): { icon: IconName; label: string } {
+  if (type.startsWith('image/')) return { icon: 'image', label: 'Изображение' }
+  if (type.startsWith('video/')) return { icon: 'video', label: 'Видео' }
+  if (type.startsWith('audio/')) return { icon: 'audio', label: 'Аудио' }
+  if (type === 'application/pdf') return { icon: 'file', label: 'Документ PDF' }
+  if (type.startsWith('text/')) return { icon: 'file', label: 'Текстовый документ' }
+  const extension = name.includes('.') ? name.split('.').pop()?.toUpperCase() : null
+  return { icon: 'file', label: extension ? `Файл ${extension}` : 'Файл' }
+}
+
 export default function FileUpload({ ownerId }: FileUploadProps) {
   const dispatch = useAppDispatch()
   const token = useAppSelector((state) => state.auth.token)
@@ -41,6 +52,9 @@ export default function FileUpload({ ownerId }: FileUploadProps) {
   const [queue, setQueue] = useState(emptyUploadQueue)
   const [dragging, setDragging] = useState(false)
   const [openError, setOpenError] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const uploading = queue.pending > 0
+  const visibleFiles = files.filter((file) => file.name.toLocaleLowerCase('ru-RU').includes(search.trim().toLocaleLowerCase('ru-RU')))
 
   useEffect(() => {
     if (listStatus === 'idle') dispatch(loadFiles(ownerId))
@@ -62,6 +76,7 @@ export default function FileUpload({ ownerId }: FileUploadProps) {
   }, [dispatch, ownerId])
 
   useEffect(() => listenForPageFileDrops(window, (files) => {
+    setDragging(false)
     dispatch(uploadFeedbackCleared())
     queueRef.current?.add(files)
   }, setDragging), [dispatch, ownerId])
@@ -95,23 +110,22 @@ export default function FileUpload({ ownerId }: FileUploadProps) {
       {createPortal(
         <div className="floating-upload">
           <button
-            className="floating-button"
+            className="p-button p-button-glass p-button-icon-only floating-button compose-button"
             type="button"
             aria-label="Загрузить файлы"
             title="Загрузить файлы"
             onClick={() => inputRef.current?.click()}
           >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="m12 3 9 5-9 5-9-5 9-5ZM3 8v9l9 5 9-5V8M12 13v9M7.5 5.5l9 5" />
-            </svg>
+            <Icon name="compose" />
           </button>
           <input ref={inputRef} type="file" multiple hidden onChange={handleFileChange} />
         </div>,
         document.body,
       )}
-      {dragging && createPortal(
+      {dragging && !uploading && createPortal(
         <div className="page-drop-overlay" role="status" aria-live="polite">
           <div>
+            <Icon name="box" />
             <strong>Отпустите файлы для загрузки</strong>
             <p>Можно перетащить сразу несколько файлов</p>
           </div>
@@ -120,19 +134,21 @@ export default function FileUpload({ ownerId }: FileUploadProps) {
       )}
       <section
         className="files-section"
-        aria-labelledby="files-heading"
+        aria-label="Файлы"
       >
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Хранилище</p>
-            <h2 id="files-heading">Мои файлы</h2>
+        <div className="files-toolbar">
+          <div className="files-heading">
+            <h2>Все файлы</h2>
+            <span className="file-count" aria-label={`Всего файлов: ${files.length}`}>{files.length}</span>
           </div>
-          <span className="files-count">{files.length}</span>
+          <label className="file-search">
+            <Icon name="search" />
+            <span className="visually-hidden">Поиск файлов по имени</span>
+            <input className="p-field" type="search" placeholder="Поиск файлов" value={search} onChange={(event) => setSearch(event.target.value)} />
+          </label>
         </div>
 
-        <p className="upload-hint">Перетащите файлы в любое место страницы или нажмите кнопку загрузки слева сверху.</p>
-
-        {queue.total > 0 && (
+        {queue.total > 0 && !uploading && (
           <p className="upload-summary" role="status" aria-live="polite">
             Загружено: {queue.completed} из {queue.total}
             {queue.pending > 0 && ` · Осталось: ${queue.pending}`}
@@ -140,13 +156,14 @@ export default function FileUpload({ ownerId }: FileUploadProps) {
           </p>
         )}
 
-        {upload.status === 'uploading' && (
-          <div className="upload-progress" role="status" aria-live="polite">
-            <div className="upload-progress__track">
-              <span style={{ width: `${progress}%` }} />
-            </div>
-            <p>{upload.filename}: {formatBytes(upload.uploadedBytes)} из {formatBytes(upload.totalBytes)} ({progress}%)</p>
-          </div>
+        {uploading && createPortal(
+          <aside className="upload-progress" role="status" aria-live="polite" aria-label="Загрузка файлов">
+            <strong>Загрузка файлов · {progress}%</strong>
+            <progress className="p-progress" max={100} value={progress} aria-label={`Загрузка ${upload.filename ?? 'файла'}`} />
+            <p>{upload.filename}: {formatBytes(upload.uploadedBytes)} из {formatBytes(upload.totalBytes)}</p>
+            <p>{progress === 100 ? 'Сохраняем файл… · ' : ''}Загружено: {queue.completed} из {queue.total}{queue.failed > 0 && ` · Ошибок: ${queue.failed}`}</p>
+          </aside>,
+          document.body,
         )}
         {queue.errors.map((error, index) => (
           <StatusMessage key={index} error={{ message: `${error.filename}: ${error.message}` }} />
@@ -154,31 +171,51 @@ export default function FileUpload({ ownerId }: FileUploadProps) {
 
         {listError && <StatusMessage error={listError} />}
         {openError && <StatusMessage error={{ message: openError }} />}
-        {listStatus === 'loading' && <p className="files-placeholder">Загружаем список файлов…</p>}
-        {listStatus === 'succeeded' && files.length === 0 && (
-          <p className="files-placeholder">Здесь пока нет файлов.</p>
+        {listStatus === 'failed' && (
+          <button className="p-button p-button-secondary p-button-touch-large" type="button" onClick={() => dispatch(loadFiles(ownerId))}>Повторить загрузку списка</button>
         )}
-        {files.length > 0 && (
+        {listStatus === 'loading' && <p className="files-placeholder" role="status"><span className="p-spinner p-spinner-small" aria-hidden="true" /> Загружаем файлы…</p>}
+        {listStatus === 'succeeded' && files.length === 0 && !uploading && (
+          <div className="files-empty">
+            <Icon name="box" />
+            <h2>Здесь пока нет файлов</h2>
+            <p>Перетащите файлы сюда или нажмите кнопку с карандашом справа внизу.</p>
+          </div>
+        )}
+        {files.length > 0 && visibleFiles.length === 0 && (
+          <div className="files-empty" role="status">
+            <Icon name="search" />
+            <h2>Ничего не найдено</h2>
+            <p>Попробуйте другое название файла.</p>
+            <button className="p-button p-button-secondary" type="button" onClick={() => setSearch('')}>Сбросить поиск</button>
+          </div>
+        )}
+        {visibleFiles.length > 0 && (
           <ul className="files-list">
-            {files.map((file) => (
-              <li key={file.id}>
-                <button
-                  className="file-open"
-                  type="button"
-                  onClick={() => handleOpenFile(file.id)}
-                  aria-label={`Открыть ${file.name} в новой вкладке`}
-                >
-                  <span className="file-icon" aria-hidden="true">↗</span>
-                  <span className="file-details">
-                    <strong>{file.name}</strong>
-                    <small>{file.type} · {formatBytes(file.size)}</small>
-                  </span>
-                  <span className="file-status">Готов</span>
-                </button>
-              </li>
-            ))}
+            {visibleFiles.map((file) => {
+              const presentation = describeFile(file.type, file.name)
+              return (
+                <li key={file.id}>
+                  <button
+                    className="file-open"
+                    type="button"
+                    onClick={() => handleOpenFile(file.id)}
+                    aria-label={`Открыть ${file.name} в новой вкладке, ${formatBytes(file.size)}`}
+                    title={`Открыть ${file.name} в новой вкладке`}
+                  >
+                    <span className={`file-icon file-icon--${presentation.icon}`}><Icon name={presentation.icon} /></span>
+                    <span className="file-details">
+                      <strong>{file.name}</strong>
+                      <small>{presentation.label}</small>
+                    </span>
+                    <span className="file-size">{formatBytes(file.size)}</span>
+                  </button>
+                </li>
+              )
+            })}
           </ul>
         )}
+        {queue.total === 0 && <p className="upload-hint"><Icon name="compose" /> Добавьте файлы кнопкой справа внизу или перетащите их сюда.</p>}
       </section>
     </>
   )

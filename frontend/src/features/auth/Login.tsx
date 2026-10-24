@@ -30,25 +30,28 @@ export default function Login() {
 
   return (
     <main className="auth-card auth-card--compact">
-      <header className="auth-header"><h1>Вход в GopherDisk</h1></header>
+      <header className="auth-header">
+        <h1>Вход в GopherDisk</h1>
+        <p>Ваши файлы под рукой.</p>
+      </header>
       <StatusMessage error={error} />
 
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} aria-busy={requestStatus === 'loading'}>
         <div className="form-grid form-grid--single">
           <div className="form-field">
-            <label className="visually-hidden" htmlFor="login-email">Электронная почта</label>
-            <input id="login-email" name="email" type="email" autoComplete="username" placeholder="Электронная почта" required />
+            <label className="form-label" htmlFor="login-email">Электронная почта</label>
+            <input className="p-field p-field-touch" id="login-email" name="email" type="email" autoComplete="username" autoCapitalize="none" spellCheck={false} placeholder="name@example.com" aria-invalid={Boolean(error?.fields?.email) || undefined} required />
           </div>
           <div className="form-field">
-            <label className="visually-hidden" htmlFor="login-password">Пароль</label>
-            <input id="login-password" name="password" type="password" autoComplete="current-password" placeholder="Пароль" required />
+            <label className="form-label" htmlFor="login-password">Пароль</label>
+            <input className="p-field p-field-touch" id="login-password" name="password" type="password" autoComplete="current-password" aria-invalid={Boolean(error?.fields?.password) || undefined} required />
           </div>
         </div>
 
         <div className="form-divider" aria-hidden="true" />
         <div className="form-actions form-actions--split">
           <Link className="text-link" to="/register">Создать аккаунт</Link>
-          <button type="submit" disabled={requestStatus === 'loading'}>
+          <button className="p-button p-button-primary p-button-touch-large" type="submit" disabled={requestStatus === 'loading'}>
             {requestStatus === 'loading' ? 'Входим…' : 'Войти'}
           </button>
         </div>

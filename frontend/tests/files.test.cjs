@@ -31,6 +31,32 @@ const mockWindow = (t, value) => {
   })
 }
 
+// Exercise chunk requests through the same mocked server as metadata requests.
+globalThis.XMLHttpRequest = class {
+  upload = {}
+  headers = new Headers()
+  controller = new AbortController()
+  open(method, path) { this.method = method; this.path = path }
+  setRequestHeader(name, value) { this.headers.set(name, value) }
+  abort() { this.controller.abort() }
+  async send(body) {
+    try {
+      const response = await fetch(this.path, {
+        method: this.method, headers: this.headers, body, signal: this.controller.signal,
+      })
+      this.status = response.status
+      this.responseText = await response.text()
+      if (response.ok) this.upload.onprogress?.({ loaded: body.size })
+      this.onload?.()
+    } catch (error) {
+      if (this.controller.signal.aborted) this.onabort?.()
+      else this.onerror?.(error)
+    } finally {
+      this.onloadend?.()
+    }
+  }
+}
+
 function dragEvent(type, files = [], types = ['Files']) {
   return Object.assign(new Event(type, { cancelable: true }), {
     dataTransfer: { files, types, dropEffect: 'none' },
@@ -91,6 +117,25 @@ test('ignores text drags and removes page listeners on cleanup', () => {
   page.dispatchEvent(event)
   assert.equal(event.defaultPrevented, false)
   assert.deepEqual(received, [])
+})
+
+test('hides the drop hint immediately on every window edge despite nested drag events', () => {
+  const page = Object.assign(new EventTarget(), { innerWidth: 1000, innerHeight: 800 })
+  let dragging = false
+  const stop = listenForPageFileDrops(page, () => assert.fail('Unexpected upload'), (value) => { dragging = value })
+  for (const [clientX, clientY] of [[0, 100], [100, 0], [1000, 100], [100, 800]]) {
+    page.dispatchEvent(dragEvent('dragenter'))
+    page.dispatchEvent(dragEvent('dragenter'))
+    page.dispatchEvent(dragEvent('dragenter'))
+    const leave = Object.assign(dragEvent('dragleave'), { clientX, clientY })
+    page.dispatchEvent(leave)
+    assert.equal(dragging, false)
+    page.dispatchEvent(dragEvent('dragenter'))
+    assert.equal(dragging, true)
+    page.dispatchEvent(dragEvent('dragleave'))
+    assert.equal(dragging, false)
+  }
+  stop()
 })
 
 test('uploads a large selection without limiting the number of files or overlapping uploads', async () => {
@@ -225,6 +270,57 @@ test('completes an empty upload without sending empty parts', async (t) => {
   const result = await makeStore().dispatch(uploadFile({ file: new File([], 'empty.txt'), ownerId: 'owner' }))
   assert.ok(uploadFile.fulfilled.match(result))
   assert.deepEqual(paths, ['/v1/files/upload', '/v1/uploads/file-id/complete'])
+})
+
+test('updates progress during parallel chunk transfers without double counting bytes', async (t) => {
+  const requests = []
+  const complete = Promise.withResolvers()
+  t.mock.method(XMLHttpRequest.prototype, 'send', function (body) {
+    this.body = body
+    requests.push(this)
+  })
+  t.mock.method(globalThis, 'fetch', async (path) => {
+    if (path === '/v1/files/upload') return json({ file: storedFile, part_size: 6 })
+    assert.equal(path, '/v1/uploads/file-id/complete')
+    await complete.promise
+    return json({ file: storedFile })
+  })
+  const store = makeStore()
+  const pending = store.dispatch(uploadFile({ file: new File(['0123456789'], 'photo.jpg'), ownerId: 'owner' }))
+  await new Promise(setImmediate)
+  assert.equal(requests.length, 2)
+  requests[0].upload.onprogress({ loaded: 2 })
+  requests[1].upload.onprogress({ loaded: 1 })
+  assert.equal(store.getState().files.upload.uploadedBytes, 3)
+  requests[0].upload.onprogress({ loaded: 2 })
+  assert.equal(store.getState().files.upload.uploadedBytes, 3)
+  for (const request of requests) {
+    request.status = 204
+    request.upload.onprogress({ loaded: request.body.size })
+    request.onload()
+    request.onloadend()
+  }
+  await new Promise(setImmediate)
+  assert.equal(store.getState().files.upload.uploadedBytes, 10)
+  assert.equal(store.getState().files.upload.status, 'uploading')
+  assert.deepEqual(store.getState().files.ids, [])
+  complete.resolve()
+  assert.ok(uploadFile.fulfilled.match(await pending))
+})
+
+test('aborts an in-flight chunk request and reports cancellation', async (t) => {
+  const { apiUploadPart } = require('../src/api/client.ts')
+  let request
+  t.mock.method(XMLHttpRequest.prototype, 'send', function () { request = this })
+  t.mock.method(XMLHttpRequest.prototype, 'abort', function () {
+    this.onabort()
+    this.onloadend()
+  })
+  const controller = new AbortController()
+  const pending = apiUploadPart('/part', new Blob(['photo']), controller.signal, () => {})
+  assert.ok(request)
+  controller.abort()
+  await assert.rejects(pending, { name: 'AbortError' })
 })
 
 test('cancels a failed upload and keeps it out of the file list', async (t) => {
