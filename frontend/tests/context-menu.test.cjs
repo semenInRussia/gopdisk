@@ -20,6 +20,7 @@ globalThis.document = dom.window.document
 globalThis.Node = dom.window.Node
 globalThis.HTMLElement = dom.window.HTMLElement
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
+window.AnimationEvent = window.Event
 window.matchMedia = () => ({ matches: true, addEventListener() {}, removeEventListener() {} })
 globalThis.ResizeObserver = globalThis.IntersectionObserver = class {
   observe() {}
@@ -114,6 +115,11 @@ test('file falls only after server deletion succeeds and is removed after the an
   await openMenu()
   await activate('Удалить')
   await act(async () => document.querySelector('#file-delete-dialog .p-desktop-modal__action--destructive').click())
+  await act(async () => {
+    const event = new window.Event('animationend', { bubbles: true })
+    Object.defineProperty(event, 'animationName', { value: 'delete-dialog-exit' })
+    document.querySelector('#file-delete-dialog').dispatchEvent(event)
+  })
   assert.equal(animations.length, 0)
   assert.deepEqual(store.getState().files.ids, [file.id])
   await act(async () => acknowledge())
@@ -177,6 +183,50 @@ test('delete modal keeps Puppertino typography under p-type and resets native di
   assert.equal(window.getComputedStyle(modal).margin, '0px')
   assert.equal(window.getComputedStyle(modal).borderTopWidth, '0px')
   assert.equal(window.getComputedStyle(modal.querySelector('.p-desktop-modal__actions')).gap, '8px')
+})
+
+test('delete modal touches its live anchor, follows scrolling and closes after its exit animation', async (t) => {
+  const { default: DeleteConfirmation } = require('../src/features/files/DeleteConfirmation.tsx')
+  t.mock.method(window, 'matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }))
+  const source = document.createElement('button')
+  const host = document.createElement('div')
+  document.body.append(source, host)
+  let sourceTop = 200
+  source.getBoundingClientRect = () => ({ left: 600, right: 700, top: sourceTop, bottom: sourceTop + 44, width: 100, height: 44 })
+  const root = createRoot(host)
+  const cancelled = t.mock.fn()
+  const confirmed = t.mock.fn()
+  t.after(async () => { await act(async () => root.unmount()); source.remove(); host.remove() })
+  await act(async () => root.render(React.createElement(DeleteConfirmation, {
+    files: [file], anchor: { element: source }, onCancel: cancelled, onConfirm: confirmed,
+  })))
+  const modal = document.querySelector('#file-delete-dialog')
+  Object.defineProperty(modal, 'offsetWidth', { value: 420 })
+  Object.defineProperty(modal, 'offsetHeight', { value: 160 })
+  await act(async () => window.dispatchEvent(new window.Event('resize')))
+  assert.equal(modal.style.left, '280px')
+  assert.equal(modal.style.top, '244px')
+  sourceTop = 100
+  await act(async () => window.dispatchEvent(new window.Event('scroll')))
+  assert.equal(modal.style.top, '144px')
+  sourceTop = 700
+  await act(async () => window.dispatchEvent(new window.Event('scroll')))
+  assert.equal(modal.style.top, '540px', 'flips above the button without a gap near the bottom edge')
+  await act(async () => modal.querySelector('.p-desktop-modal__action--secondary').click())
+  assert.equal(modal.dataset.closing, 'true')
+  assert.ok(modal.open)
+  assert.equal(cancelled.mock.callCount(), 0)
+  const end = (name) => {
+    const event = new window.Event('animationend', { bubbles: true })
+    Object.defineProperty(event, 'animationName', { value: name })
+    modal.dispatchEvent(event)
+  }
+  await act(async () => end('delete-dialog-enter'))
+  assert.ok(modal.open)
+  await act(async () => end('delete-dialog-exit'))
+  assert.equal(modal.open, false)
+  assert.equal(cancelled.mock.callCount(), 1)
+  assert.equal(confirmed.mock.callCount(), 0)
 })
 
 test('context menu opens permissions despite a blur before click', async (t) => {

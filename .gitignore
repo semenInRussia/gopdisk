@@ -4,3 +4,4 @@ frontend/dist/
 frontend/.vite/
 frontend/.env
 frontend/*.local
+data

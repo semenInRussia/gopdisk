@@ -12,7 +12,7 @@ import { openFile } from './openFile'
 import { animateFileDeletion } from './fileDeletionAnimation'
 import { selectCurrentUser } from '../users/usersSlice'
 import ShareFileDialog, { type CopyStatus } from './ShareFileDialog'
-import DeleteConfirmation from './DeleteConfirmation'
+import DeleteConfirmation, { type DeleteAnchor } from './DeleteConfirmation'
 
 interface Props {
   files: StoredFile[]
@@ -30,7 +30,7 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
   const [copyStatus, setCopyStatus] = useState<CopyStatus>('copying')
   const [busy, setBusy] = useState(false)
   const [deleteTargets, setDeleteTargets] = useState<StoredFile[] | null>(null)
-  const [deleteAnchor, setDeleteAnchor] = useState<DOMRect | null>(null)
+  const [deleteAnchor, setDeleteAnchor] = useState<DeleteAnchor | null>(null)
   const [downloadProgress, setDownloadProgress] = useState<string | null>(null)
   const [toolbarStuck, setToolbarStuck] = useState(false)
   const [toolbarFloating, setToolbarFloating] = useState(false)
@@ -200,12 +200,23 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
   async function runAction(action: 'download' | 'delete', confirmedFiles?: StoredFile[], trigger?: HTMLElement) {
     const targets = [...(confirmedFiles ?? selectedFiles)]
     if (busy || targets.length === 0) return
-    closeMenu()
     if (action === 'delete' && !confirmedFiles) {
-      setDeleteAnchor((trigger ?? (document.activeElement as HTMLElement | null))?.getBoundingClientRect() ?? null)
+      const source = trigger ?? document.activeElement as HTMLElement | null
+      const tether = source?.closest('[role="menu"]') ? returnFocus.current : source
+      const sourceRect = source?.getBoundingClientRect()
+      const tetherRect = tether?.getBoundingClientRect()
+      setDeleteAnchor(tether ? {
+        element: tether,
+        offset: source !== tether && sourceRect && tetherRect ? {
+          left: sourceRect.left - tetherRect.left, top: sourceRect.top - tetherRect.top,
+          width: sourceRect.width, height: sourceRect.height,
+        } : undefined,
+      } : null)
+      closeMenu()
       setDeleteTargets(targets)
       return
     }
+    closeMenu()
     setBusy(true)
     onError(null)
     const failures: string[] = []
@@ -303,7 +314,7 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
     <section className="file-browser" aria-label="Обзор файлов" aria-busy={busy}>
       <div className="file-toolbar-sentinel" ref={toolbarSentinel} aria-hidden="true" />
       <div ref={toolbarSlot} className="file-selection-toolbar-slot" style={{ height: toolbarHeight || undefined }}>
-        <div ref={toolbarRef} className={`file-selection-toolbar${toolbarFloating ? ' file-selection-toolbar--stuck' : ''}`}>
+        <div ref={toolbarRef} className={`file-selection-toolbar${toolbarFloating ? ' p-material-thick file-selection-toolbar--stuck' : ''}`}>
           <span role="status" aria-live="polite">{downloadProgress ?? (busy ? 'Выполняем действие…' : selectedFiles.length ? `Выбрано: ${selectedFiles.length}` : 'Выберите файлы кликом или рамкой')}</span>
           <div className="file-selection-actions">
             <button type="button" className="p-button p-button-secondary" disabled={busy || selectedFiles.length !== 1} onClick={(event) => void shareFile(event)}>Права доступа</button>
