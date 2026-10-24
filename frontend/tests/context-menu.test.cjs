@@ -42,19 +42,47 @@ const permissionsApi = require('../src/features/permissions/permissionsApi.ts')
 
 const file = { id: 'file-id', owner_id: 'owner-id', name: 'document.txt', type: 'text/plain', size: 5, status: 'ready' }
 
-async function render(t) {
+async function render(t, files = [file]) {
   const host = document.createElement('div')
   document.body.append(host)
   const root = createRoot(host)
   const store = configureStore({ reducer: { files: filesReducer, users: usersReducer, permissions: permissionsReducer } })
-  store.dispatch(filesReceived([file]))
+  store.dispatch(filesReceived(files))
   store.dispatch(currentUserSet({ id: file.owner_id, name: 'Owner', email: 'owner@example.com', activated: true }))
   await act(async () => root.render(React.createElement(Provider, { store }, React.createElement(FileBrowser, {
-    files: [file], viewMode: 'grid', token: 'token', onError: (message) => { if (message) assert.fail(message) },
+    files, viewMode: 'grid', token: 'token', onError: (message) => { if (message) assert.fail(message) },
   }))))
   t.after(async () => { await act(async () => root.unmount()); host.remove() })
   return store
 }
+
+test('touch taps toggle multiple files and the Open action opens a single selection', async (t) => {
+  const opening = t.mock.method(require('../src/features/files/openFile.ts'), 'openFile', async () => {})
+  await render(t, [file, { ...file, id: 'second-file', name: 'second.txt' }])
+  const buttons = [...document.querySelectorAll('[data-file-id]')]
+  const open = document.querySelector('.file-touch-open')
+  async function tap(button) {
+    await act(async () => {
+      const pointer = new window.Event('pointerdown', { bubbles: true })
+      Object.defineProperty(pointer, 'pointerType', { value: 'touch' })
+      button.dispatchEvent(pointer)
+      button.click()
+    })
+  }
+  assert.equal(open.disabled, true)
+  await tap(buttons[0])
+  assert.equal(open.disabled, false)
+  await tap(buttons[1])
+  assert.deepEqual(buttons.map((button) => button.getAttribute('aria-pressed')), ['true', 'true'])
+  assert.equal(open.disabled, true)
+  await tap(buttons[0])
+  assert.deepEqual(buttons.map((button) => button.getAttribute('aria-pressed')), ['false', 'true'])
+  await act(async () => open.click())
+  assert.deepEqual(opening.mock.calls[0].arguments, ['second-file', 'token'])
+  assert.equal(opening.mock.callCount(), 1)
+  await act(async () => buttons[0].click())
+  assert.deepEqual(buttons.map((button) => button.getAttribute('aria-pressed')), ['true', 'false'])
+})
 
 async function openMenu() {
   await act(async () => document.querySelector('[data-file-id]').dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 50, clientY: 50 })))

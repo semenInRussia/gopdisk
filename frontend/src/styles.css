@@ -890,6 +890,16 @@ body {
   margin-inline-start: auto;
 }
 
+.file-touch-open {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .file-touch-open {
+    display: inline-flex;
+  }
+}
+
 .file-browser-content {
   min-height: 100px;
   padding-bottom: var(--gd-space-6);
@@ -1162,24 +1172,50 @@ body {
 
 @media (max-width: 767px) {
   body {
-    padding: 16px;
+    padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  }
+
+  .profile-page {
+    margin-bottom: 0;
+    padding-bottom: calc(88px + env(safe-area-inset-bottom));
   }
 
   .account-menu {
-    right: 24px;
-    top: 24px;
+    right: 16px;
+    top: 16px;
+  }
+
+  .account-panel {
+    max-height: calc(100dvh - 100px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    max-width: calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right));
+    padding: 20px;
+    position: fixed;
+    right: max(16px, env(safe-area-inset-right));
+    top: calc(max(12px, env(safe-area-inset-top)) + 72px);
   }
 
   .floating-upload {
-    right: max(20px, env(safe-area-inset-right));
-    bottom: max(20px, env(safe-area-inset-bottom));
+    right: calc(16px + env(safe-area-inset-right));
+    bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .compose-button.p-button {
+    width: 56px;
+    height: 56px;
+    border-radius: 18px;
+  }
+
+  .upload-progress {
+    bottom: calc(84px + env(safe-area-inset-bottom));
+    right: max(16px, env(safe-area-inset-right));
+    max-width: calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right));
   }
 
   .auth-card,
   .auth-card--compact,
   .profile-card {
     border-radius: 20px;
-    --gd-card-padding: var(--gd-space-6);
+    --gd-card-padding: clamp(16px, 4vw, 24px);
     padding: var(--gd-card-padding);
     width: 100%;
   }
@@ -1194,7 +1230,21 @@ body {
   }
 
   .form-actions .p-button {
-    min-width: 100%;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .form-actions {
+    flex-wrap: wrap;
+  }
+
+  .p-field {
+    --p-field-font: 1rem;
+    font-size: 1rem;
+  }
+
+  .form-field .p-field {
+    --p-field-font: 1rem;
   }
 
   .auth-header {
@@ -1214,12 +1264,84 @@ body {
   }
 
   .files-toolbar-actions {
+    gap: 8px;
+    width: 100%;
+  }
+
+  .files-toolbar {
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .files-toolbar-actions:has(.file-search--open) .file-search {
+    flex: 1 0 100%;
     width: 100%;
   }
 
   .file-view-control {
     --p-seg-height: 44px;
     --p-seg-radius: 22px;
+    max-width: 100%;
+  }
+
+  .file-view-control .p-segment > span {
+    padding-inline: 12px;
+  }
+
+  .file-touch-open {
+    display: inline-flex;
+  }
+
+  .file-selection-toolbar {
+    gap: 8px;
+  }
+
+  .file-selection-toolbar--stuck {
+    padding-top: calc(12px + env(safe-area-inset-top));
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+  }
+
+  .file-selection-toolbar .file-selection-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .file-selection-actions .p-button {
+    min-width: 0;
+  }
+
+  .files-list--grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 96px), 1fr));
+    padding: 8px;
+  }
+
+  .file-open {
+    gap: 8px;
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .file-open > .file-icon {
+    grid-row: span 2;
+  }
+
+  .file-size {
+    grid-column: 2;
+    text-align: left;
+  }
+
+  .files-list--grid .file-open > .file-icon {
+    grid-row: auto;
+  }
+
+  .permissions-dialog {
+    padding: 20px;
+    max-height: calc(100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+
+  .file-delete-dialog .p-desktop-modal__action {
+    min-height: 44px;
   }
 
   .file-search .p-field {

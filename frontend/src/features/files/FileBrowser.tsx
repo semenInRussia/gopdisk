@@ -46,6 +46,7 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
   const returnFocus = useRef<HTMLElement | null>(null)
   const anchor = useRef<string | null>(null)
   const drag = useRef<{ x: number; y: number; base: string[] } | null>(null)
+  const touchSelection = useRef(false)
   const ids = files.map((file) => file.id)
   const selectedFiles = files.filter((file) => selected.includes(file.id))
   const hasFiles = files.length > 0
@@ -315,15 +316,16 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
       <div className="file-toolbar-sentinel" ref={toolbarSentinel} aria-hidden="true" />
       <div ref={toolbarSlot} className="file-selection-toolbar-slot" style={{ height: toolbarHeight || undefined }}>
         <div ref={toolbarRef} className={`file-selection-toolbar${toolbarFloating ? ' p-material-thick file-selection-toolbar--stuck' : ''}`}>
-          <span role="status" aria-live="polite">{downloadProgress ?? (busy ? 'Выполняем действие…' : selectedFiles.length ? `Выбрано: ${selectedFiles.length}` : 'Выберите файлы кликом или рамкой')}</span>
+          <span role="status" aria-live="polite">{downloadProgress ?? (busy ? 'Выполняем действие…' : selectedFiles.length ? `Выбрано: ${selectedFiles.length}` : 'Выберите файлы для действий')}</span>
           <div className="file-selection-actions">
+            <button type="button" className="p-button p-button-secondary file-touch-open" disabled={busy || selectedFiles.length !== 1} onClick={() => void open(selectedFiles[0].id)}>Открыть</button>
             <button type="button" className="p-button p-button-secondary" disabled={busy || selectedFiles.length !== 1} onClick={(event) => void shareFile(event)}>Права доступа</button>
             <button type="button" className="p-button p-button-secondary" disabled={busy || !selectedFiles.length} onClick={() => void runAction('download')}>Скачать</button>
             <button type="button" className="p-button p-button-destructive" disabled={busy || !selectedFiles.length} onClick={(event) => void runAction('delete', undefined, event.currentTarget)}>Удалить</button>
           </div>
         </div>
       </div>
-      <p className="visually-hidden" id="file-selection-help">Клик — выделить, Cmd или Ctrl и клик — добавить к выделению, Shift и клик — диапазон. Двойной клик или Enter — открыть. Cmd или Ctrl и A — выбрать всё, Escape — снять выделение. Контекстное меню: правая кнопка мыши или Shift и F10.</p>
+      <p className="visually-hidden" id="file-selection-help">На сенсорном экране касание добавляет файл к выделению или снимает выделение. Для открытия выберите один файл и нажмите «Открыть». Клик — выделить, Cmd или Ctrl и клик — добавить к выделению, Shift и клик — диапазон. Двойной клик или Enter — открыть. Cmd или Ctrl и A — выбрать всё, Escape — снять выделение. Контекстное меню: правая кнопка мыши или Shift и F10.</p>
       <div ref={root} className="file-browser-content" tabIndex={0} aria-label="Выбор файлов" aria-describedby="file-selection-help" onKeyDown={keyboard}
         onPointerDown={startSelection} onPointerMove={moveSelection} onPointerUp={endSelection} onPointerCancel={endSelection} onLostPointerCapture={endSelection}>
         <ul className={`files-list${viewMode === 'grid' ? ' files-list--grid' : ''}`}>
@@ -332,8 +334,11 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
             return <li key={file.id}>
               <button className={`file-open${selected.includes(file.id) ? ' file-open--selected' : ''}`} data-file-id={file.id} type="button" aria-pressed={selected.includes(file.id)} disabled={busy}
                 aria-label={file.name} title={file.name}
+                onPointerDown={(event) => { touchSelection.current = event.pointerType === 'touch' }}
                 onClick={(event) => {
-                  setSelected((current) => selectFileIds(current, ids, file.id, anchor.current, { toggle: event.metaKey || event.ctrlKey, range: event.shiftKey }))
+                  const toggle = touchSelection.current || event.metaKey || event.ctrlKey
+                  touchSelection.current = false
+                  setSelected((current) => selectFileIds(current, ids, file.id, anchor.current, { toggle, range: event.shiftKey }))
                   if (!event.shiftKey) anchor.current = file.id
                 }}
                 onDoubleClick={() => { if (!busy) void open(file.id) }}
