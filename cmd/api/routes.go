@@ -38,7 +38,7 @@ func (app *Application) routes() http.Handler {
 	router.HandlerFunc(http.MethodGet, "/v1/files/:id", app.requireFilePermission("id", data.PermissionRead, app.filesGetHandler))
 	router.HandlerFunc(http.MethodDelete, "/v1/files/:id", app.requireFilePermission("id", data.PermissionDelete, app.filesDeleteHandler))
 	router.HandlerFunc(http.MethodPatch, "/v1/files/:id", app.requireFilePermission("id", data.PermissionWrite, app.filesPatchHandler))
-	router.HandlerFunc(http.MethodGet, "/v1/files/:id/content", app.requireFilePermission("id", data.PermissionRead, app.filesContentGetHandler))
+	router.HandlerFunc(http.MethodGet, "/v1/files/:id/content", app.downloadTimeout(app.requireFilePermission("id", data.PermissionRead, app.filesContentGetHandler)))
 	router.HandlerFunc(http.MethodHead, "/v1/files/:id/content", app.requireFilePermission("id", data.PermissionRead, app.filesContentHeadHandler))
 
 	// Uploads

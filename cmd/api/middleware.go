@@ -33,6 +33,21 @@ func (app *Application) uploadPartTimeout(next http.HandlerFunc) http.HandlerFun
 	}
 }
 
+// Downloads may outlive the server's ordinary write budget on slow connections.
+func (app *Application) downloadTimeout(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		const timeout = 10 * time.Minute
+		controller := http.NewResponseController(w)
+		if err := controller.SetWriteDeadline(time.Now().Add(timeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			app.serverErrorResponse(w, err)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), timeout)
+		defer cancel()
+		next(w, r.WithContext(ctx))
+	}
+}
+
 func (app *Application) enableCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Vary", "Origin")
