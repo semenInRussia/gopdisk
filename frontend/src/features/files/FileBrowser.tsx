@@ -1,13 +1,15 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useAppDispatch, useAppSelector } from '../../app/hooks'
 import { serializeApiError } from '../../api/client'
 import Icon from '../../components/Icon'
+import { activationPoint, type SurfaceOrigin } from '../../components/surfaceAnimation'
 import { fileRemoved, type FileViewMode, type StoredFile } from './filesSlice'
 import { describeFile, formatBytes } from './filePresentation'
 import { copyStoredFilePath, deleteStoredFile, downloadStoredFiles } from './fileActions'
 import { intersects, selectFileIds } from './fileSelection'
 import { openFile } from './openFile'
+import { animateFileDeletion } from './fileDeletionAnimation'
 import { selectCurrentUser } from '../users/usersSlice'
 import ShareFileDialog, { type CopyStatus } from './ShareFileDialog'
 
@@ -23,6 +25,7 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
   const currentUser = useAppSelector(selectCurrentUser)
   const [selected, setSelected] = useState<string[]>([])
   const [sharedFile, setSharedFile] = useState<StoredFile | null>(null)
+  const [shareOrigin, setShareOrigin] = useState<SurfaceOrigin>({ x: 0, y: 0 })
   const [copyStatus, setCopyStatus] = useState<CopyStatus>('copying')
   const [busy, setBusy] = useState(false)
   const [downloadProgress, setDownloadProgress] = useState<string | null>(null)
@@ -148,9 +151,10 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
     root.current?.focus({ preventScroll: true })
   }
 
-  async function shareFile() {
+  async function shareFile(event: MouseEvent<HTMLButtonElement>) {
     if (busy || selectedFiles.length !== 1) return
     const file = selectedFiles[0]
+    setShareOrigin(activationPoint(event))
     // Start copying before moving focus or removing the clicked menu item.
     const copying = copyStoredFilePath(file.id)
     setMenu(null)
@@ -198,6 +202,7 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
     setBusy(true)
     onError(null)
     const failures: string[] = []
+    const removals: Promise<void>[] = []
     try {
       if (action === 'download') {
         await downloadStoredFiles(targets, token, (completed, total) => setDownloadProgress(`Готовим архив: ${completed} из ${total}`))
@@ -206,8 +211,11 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
       for (const file of targets) {
         try {
           await deleteStoredFile(file.id, token)
-          dispatch(fileRemoved(file.id))
-          setSelected((current) => current.filter((id) => id !== file.id))
+          const button = [...(root.current?.querySelectorAll<HTMLElement>('[data-file-id]') ?? [])].find((element) => element.dataset.fileId === file.id)
+          removals.push(animateFileDeletion(button?.closest('li') ?? null).then(() => {
+            dispatch(fileRemoved(file.id))
+            setSelected((current) => current.filter((id) => id !== file.id))
+          }))
         } catch (error) {
           failures.push(`${file.name}: ${serializeApiError(error).message}`)
         }
@@ -216,6 +224,7 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
     } catch (error) {
       onError(serializeApiError(error).message)
     } finally {
+      await Promise.all(removals)
       setBusy(false)
       setDownloadProgress(null)
     }
@@ -290,7 +299,7 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
         <div ref={toolbarRef} className={`file-selection-toolbar${toolbarFloating ? ' file-selection-toolbar--stuck' : ''}`}>
           <span role="status" aria-live="polite">{downloadProgress ?? (busy ? 'Выполняем действие…' : selectedFiles.length ? `Выбрано: ${selectedFiles.length}` : 'Выберите файлы кликом или рамкой')}</span>
           <div className="file-selection-actions">
-            <button type="button" className="p-button p-button-secondary" disabled={busy || selectedFiles.length !== 1} onClick={() => void shareFile()}>Права доступа</button>
+            <button type="button" className="p-button p-button-secondary" disabled={busy || selectedFiles.length !== 1} onClick={(event) => void shareFile(event)}>Права доступа</button>
             <button type="button" className="p-button p-button-secondary" disabled={busy || !selectedFiles.length} onClick={() => void runAction('download')}>Скачать</button>
             <button type="button" className="p-button p-button-destructive" disabled={busy || !selectedFiles.length} onClick={() => void runAction('delete')}>Удалить</button>
           </div>
@@ -334,7 +343,7 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
         </ul>
       </div>
       {marquee && createPortal(<div className="file-selection-rect" style={marquee} aria-hidden="true" />, document.body)}
-      {menu && createPortal(<div ref={menuRef} className="file-context-menu" role="menu" aria-label="Действия с файлами" style={{ left: menu.x, top: menu.y }} onMouseDown={(event) => {
+      {menu && createPortal(<div ref={menuRef} className="p-menu file-context-menu" role="menu" aria-label="Действия с файлами" style={{ left: menu.x, top: menu.y }} onMouseDown={(event) => {
         // Safari may blur to the page before click when pressing a menu button.
         if (event.button === 0) event.preventDefault()
       }} onBlur={(event) => {
@@ -349,11 +358,12 @@ export default function FileBrowser({ files, viewMode, token, onError }: Props) 
           buttons[next]?.focus()
         }
       }}>
-        <button type="button" role="menuitem" onClick={() => void runAction('download')}>Скачать{selectedFiles.length > 1 ? ` (${selectedFiles.length})` : ''}</button>
-        <button type="button" role="menuitem" disabled={selectedFiles.length !== 1} title="Права доступа и ссылка на выбранный файл" onClick={() => void shareFile()}>Права доступа</button>
-        <button type="button" role="menuitem" className="file-context-delete" onClick={() => void runAction('delete')}>Удалить{selectedFiles.length > 1 ? ` (${selectedFiles.length})` : ''}</button>
+        <button type="button" role="menuitem" className="p-menu__item" onClick={() => void runAction('download')}><span className="p-menu__icon"><Icon name="download" /></span>Скачать{selectedFiles.length > 1 ? ` (${selectedFiles.length})` : ''}</button>
+        <button type="button" role="menuitem" className="p-menu__item" disabled={selectedFiles.length !== 1} title="Права доступа и ссылка на выбранный файл" onClick={(event) => void shareFile(event)}><span className="p-menu__icon"><Icon name="lock" /></span>Права доступа</button>
+        <div className="p-menu__separator" role="separator" />
+        <button type="button" role="menuitem" className="p-menu__item p-menu__item--destructive" onClick={() => void runAction('delete')}><span className="p-menu__icon"><Icon name="trash" /></span>Удалить{selectedFiles.length > 1 ? ` (${selectedFiles.length})` : ''}</button>
       </div>, document.body)}
-      {sharedFile && <ShareFileDialog key={sharedFile.id} file={sharedFile} initialStatus={copyStatus} token={token} canManagePermissions={sharedFile.owner_id === currentUser?.id} onClose={() => {
+      {sharedFile && <ShareFileDialog key={sharedFile.id} file={sharedFile} origin={shareOrigin} initialStatus={copyStatus} token={token} canManagePermissions={sharedFile.owner_id === currentUser?.id} onClose={() => {
         setSharedFile(null)
         if (returnFocus.current?.isConnected) returnFocus.current.focus()
         root.current?.focus()

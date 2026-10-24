@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAppDispatch, useAppSelector } from '../../app/hooks'
 import Icon from '../../components/Icon'
+import { activationPoint, type SurfaceOrigin } from '../../components/surfaceAnimation'
+import { useSurfaceTransition } from '../../components/useSurfaceTransition'
 import FileUpload from '../files/FileUpload'
 import { filesCleared } from '../files/filesSlice'
 import { currentUserSet, selectCurrentUser } from '../users/usersSlice'
@@ -16,9 +18,12 @@ export default function Profile() {
   const accountRef = useRef<HTMLDivElement>(null)
   const accountButtonRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLElement>(null)
+  const openingPoint = useRef<SurfaceOrigin>({ x: 0, y: 0 })
+
+  const userInfoPresent = useSurfaceTransition(panelRef, userInfoOpen, openingPoint.current)
 
   useEffect(() => {
-    if (!userInfoOpen) return
+    if (!userInfoOpen || !userInfoPresent) return
     panelRef.current?.focus()
 
     function handleOutsideClick(event: PointerEvent) {
@@ -40,7 +45,7 @@ export default function Profile() {
       document.removeEventListener('pointerdown', handleOutsideClick)
       document.removeEventListener('keydown', handleEscape)
     }
-  }, [userInfoOpen])
+  }, [userInfoOpen, userInfoPresent])
 
   function handleSignOut() {
     dispatch(signedOut())
@@ -65,7 +70,7 @@ export default function Profile() {
         <FileUpload ownerId={user.id} />
       </main>
       <div className="account-menu" ref={accountRef} onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) setUserInfoOpen(false)
+        if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setUserInfoOpen(false)
       }}>
         <button
           className="p-button p-button-secondary p-button-icon-only floating-button account-button"
@@ -76,12 +81,18 @@ export default function Profile() {
           aria-haspopup="dialog"
           aria-expanded={userInfoOpen}
           aria-controls="user-info"
-          onClick={() => setUserInfoOpen((open) => !open)}
+          onMouseDown={(event) => {
+            if (event.button === 0) event.preventDefault()
+          }}
+          onClick={(event) => {
+            if (!userInfoOpen) openingPoint.current = activationPoint(event)
+            setUserInfoOpen((open) => !open)
+          }}
         >
           <Icon name="person" />
         </button>
-        {userInfoOpen && (
-          <section className="account-panel" id="user-info" role="dialog" aria-labelledby="user-info-heading" tabIndex={-1} ref={panelRef}>
+        {userInfoPresent && (
+          <section className="account-panel" id="user-info" role="dialog" aria-labelledby="user-info-heading" aria-hidden={!userInfoOpen} inert={!userInfoOpen} tabIndex={-1} ref={panelRef}>
             <div className="account-panel-heading">
               <h2 id="user-info-heading">Моя информация</h2>
               <button className="p-button p-button-secondary p-button-icon-only p-button-touch panel-close" type="button" aria-label="Закрыть информацию о пользователе" onClick={() => {

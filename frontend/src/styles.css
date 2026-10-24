@@ -907,6 +907,13 @@ body {
   cursor: wait;
 }
 
+.file-removing {
+  pointer-events: none;
+  position: relative;
+  transform-origin: center;
+  z-index: 2;
+}
+
 .file-selection-rect {
   background: color-mix(in srgb, var(--p-sys-blue) 16%, transparent);
   border: 1px solid var(--p-sys-blue);
@@ -917,44 +924,23 @@ body {
 
 .file-context-menu {
   background: var(--gd-surface);
-  border: 1px solid var(--gd-divider);
-  border-radius: 12px;
-  box-shadow: var(--p-shadow-overlay);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
   max-width: calc(100vw - 16px);
-  padding: 6px;
   position: fixed;
   width: 200px;
   z-index: 60;
 }
 
-.file-context-menu button {
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-  color: var(--p-text-primary);
-  cursor: pointer;
-  display: block;
-  font: inherit;
-  min-height: 44px;
-  padding: 8px 12px;
-  text-align: left;
-  width: 100%;
+.file-context-menu .p-menu__icon svg {
+  height: 15px;
+  width: 15px;
 }
 
-.file-context-menu button:hover,
-.file-context-menu button:focus-visible {
-  background: color-mix(in srgb, var(--p-sys-blue) 12%, var(--gd-surface));
-  outline: 2px solid var(--p-sys-blue);
-  outline-offset: -2px;
-}
-
-.file-context-menu .file-context-delete {
-  color: var(--p-sys-red);
-}
-
-.file-context-menu button:disabled {
-  color: var(--p-text-tertiary);
-  cursor: default;
+@media (pointer: coarse) {
+  .file-context-menu .p-menu__item {
+    height: 44px;
+  }
 }
 
 .permissions-dialog {
@@ -972,6 +958,26 @@ body {
 
 .permissions-dialog::backdrop {
   background: color-mix(in srgb, var(--p-text-primary) 25%, transparent);
+}
+
+@keyframes dialog-backdrop-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes dialog-backdrop-exit {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .permissions-dialog[open]::backdrop {
+    animation: dialog-backdrop-enter 220ms ease-out;
+  }
+
+  .permissions-dialog[open][data-closing="true"]::backdrop {
+    animation: dialog-backdrop-exit 300ms ease-in both;
+  }
 }
 
 .permissions-dialog-header {

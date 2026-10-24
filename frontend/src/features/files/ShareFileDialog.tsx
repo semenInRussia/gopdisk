@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Icon from '../../components/Icon'
 import { copyStoredFilePath } from './fileActions'
 import type { StoredFile } from './filesSlice'
 import FilePermissions from '../permissions/FilePermissions'
+import type { SurfaceOrigin } from '../../components/surfaceAnimation'
+import { useSurfaceTransition } from '../../components/useSurfaceTransition'
 
 export type CopyStatus = 'copying' | 'copied' | 'failed'
 
@@ -12,21 +14,23 @@ interface Props {
   initialStatus: CopyStatus
   token: string | null
   canManagePermissions: boolean
+  origin: SurfaceOrigin
   onClose: () => void
 }
 
-export default function ShareFileDialog({ file, initialStatus, token, canManagePermissions, onClose }: Props) {
+export default function ShareFileDialog({ file, initialStatus, token, canManagePermissions, origin, onClose }: Props) {
   const dialog = useRef<HTMLDialogElement>(null)
   const input = useRef<HTMLInputElement>(null)
+  const [open, setOpen] = useState(true)
+  useSurfaceTransition(dialog, open, origin, () => dialog.current?.close())
   const [retryStatus, setRetryStatus] = useState<CopyStatus | null>(null)
   const status = retryStatus ?? initialStatus
   const url = new URL(`/files/${encodeURIComponent(file.id)}`, window.location.origin).href
 
-  useEffect(() => {
-    dialog.current?.showModal()
+  useLayoutEffect(() => {
     input.current?.focus()
     input.current?.select()
-  }, [])
+  }, [origin])
 
   async function copy() {
     setRetryStatus('copying')
@@ -50,12 +54,12 @@ export default function ShareFileDialog({ file, initialStatus, token, canManageP
     <div className="form-actions share-file-actions"><button className="p-button p-button-primary" type="button" onClick={() => void copy()}>Скопировать ссылку</button></div>
   </>
 
-  if (canManagePermissions) return <FilePermissions file={file} token={token} onClose={onClose}>{content}</FilePermissions>
+  if (canManagePermissions) return <FilePermissions file={file} token={token} origin={origin} onClose={onClose}>{content}</FilePermissions>
 
-  return createPortal(<dialog ref={dialog} className="permissions-dialog" aria-labelledby="share-title" onClose={onClose}>
+  return createPortal(<dialog ref={dialog} className="permissions-dialog" data-closing={!open} aria-labelledby="share-title" onClose={onClose} onCancel={(event) => { event.preventDefault(); setOpen(false) }}>
     <header className="permissions-dialog-header">
       <div><h2 id="share-title">Права доступа</h2><p>{file.name}</p></div>
-      <button className="p-button p-button-secondary p-button-icon-only" type="button" aria-label="Закрыть" onClick={() => dialog.current?.close()}><Icon name="close" /></button>
+      <button className="p-button p-button-secondary p-button-icon-only" type="button" aria-label="Закрыть" disabled={!open} onClick={() => setOpen(false)}><Icon name="close" /></button>
     </header>
     {content}
   </dialog>, document.body)

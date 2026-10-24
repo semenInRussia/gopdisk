@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import { useAppDispatch, useAppSelector } from '../../app/hooks'
 import { serializeApiError } from '../../api/client'
 import Icon from '../../components/Icon'
+import type { SurfaceOrigin } from '../../components/surfaceAnimation'
+import { useSurfaceTransition } from '../../components/useSurfaceTransition'
 import StatusMessage from '../auth/StatusMessage'
 import type { StoredFile } from '../files/filesSlice'
 import { loadFilePermissions, revokeFilePermissions, saveFilePermissions } from './permissionsApi'
@@ -20,9 +22,10 @@ interface Props {
   token: string | null
   onClose: () => void
   children?: ReactNode
+  origin: SurfaceOrigin
 }
 
-export default function FilePermissions({ file, token, onClose, children }: Props) {
+export default function FilePermissions({ file, token, origin, onClose, children }: Props) {
   const dispatch = useAppDispatch()
   const permissions = useAppSelector((state) => state.permissions.byFileId[file.id] ?? emptyPermissions)
   const dialog = useRef<HTMLDialogElement>(null)
@@ -31,14 +34,16 @@ export default function FilePermissions({ file, token, onClose, children }: Prop
   const [loaded, setLoaded] = useState(false)
   const [attempt, setAttempt] = useState(0)
   const [busy, setBusy] = useState(false)
+  const [open, setOpen] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [userId, setUserId] = useState('')
   const [codes, setCodes] = useState<PermissionCode[]>(['files:read'])
   const users = [...new Set(permissions.map((permission) => permission.user_id))]
 
+  useSurfaceTransition(dialog, open, origin, () => dialog.current?.close())
+
   useEffect(() => {
-    dialog.current?.showModal()
     const controller = new AbortController()
     setLoading(true)
     setLoaded(false)
@@ -90,12 +95,13 @@ export default function FilePermissions({ file, token, onClose, children }: Prop
   }
 
   return createPortal(
-    <dialog ref={dialog} className="permissions-dialog" aria-labelledby="permissions-title" aria-describedby="permissions-file" onClose={onClose} onCancel={(event) => {
-      if (busy) event.preventDefault()
+    <dialog ref={dialog} className="permissions-dialog" data-closing={!open} aria-labelledby="permissions-title" aria-describedby="permissions-file" onClose={onClose} onCancel={(event) => {
+      event.preventDefault()
+      if (!busy) setOpen(false)
     }}>
       <header className="permissions-dialog-header">
         <div><h2 id="permissions-title">Права доступа</h2><p id="permissions-file">{file.name}</p></div>
-        <button className="p-button p-button-secondary p-button-icon-only" type="button" aria-label="Закрыть окно общего доступа" disabled={busy} onClick={() => dialog.current?.close()}><Icon name="close" /></button>
+        <button className="p-button p-button-secondary p-button-icon-only" type="button" aria-label="Закрыть окно общего доступа" disabled={busy || !open} onClick={() => setOpen(false)}><Icon name="close" /></button>
       </header>
       {children}
       <h3 className="share-permissions-title">Права доступа</h3>
